@@ -12,9 +12,11 @@
 import { useState } from "react";
 import {
   ArrowLeft, ArrowRight, Check, Download, ShieldCheck, IdCard,
-  FileText, AlertTriangle, MapPin, Building2, User,
+  FileText, AlertTriangle, MapPin, Building2, User, ExternalLink,
 } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useSearch } from "wouter";
+
+const DESKWORKS_SIGNUP_URL = "https://jvo.satellitedeskworks.com/member-sign-up";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import {
@@ -110,6 +112,9 @@ const addrFilled = (a: Addr) => !!(a.street && a.city && a.state && a.zip);
 type StepId = "intro" | "service" | "applicant" | "business" | "photoId" | "addressId" | "authorized" | "review";
 
 export default function MailboxApplication() {
+  const searchParams = new URLSearchParams(useSearch());
+  const plan = searchParams.get("plan") || "";
+
   const [s, setS] = useState<State>(initialState);
   const [stepIdx, setStepIdx] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -245,14 +250,15 @@ export default function MailboxApplication() {
             <ArrowLeft size={13} /> Back
           </Link>
           <p className="font-sans text-[10px] font-semibold tracking-[0.3em] uppercase text-white/30 mb-3">
-            New Member Onboarding
+            {plan ? `${plan} Plan · Step 1 of 2` : "New Member Onboarding"}
           </p>
           <h1 className="font-display text-3xl md:text-4xl font-semibold text-white leading-[1.02]">
             Mailbox Application
           </h1>
           <p className="font-sans text-sm text-white/45 mt-3 leading-relaxed">
-            We'll use your answers to prepare your USPS Form 1583 — the form that authorizes JVO to
-            receive mail on your behalf. Everything stays on your device.
+            Every JVO membership includes a mailbox, so we start by preparing your USPS Form 1583 — the
+            form that authorizes JVO to receive mail on your behalf. Then you'll finish registration.
+            Everything on this page stays on your device.
           </p>
         </div>
 
@@ -533,8 +539,28 @@ export default function MailboxApplication() {
                   </div>
                 </div>
 
+                {/* Step 2 — continue to member registration */}
+                <div className="border border-white/12 bg-white/[0.03] p-6">
+                  <p className="font-sans text-[10px] font-semibold tracking-[0.3em] uppercase text-white/30 mb-2">
+                    {plan ? `${plan} Plan · Step 2 of 2` : "Step 2 of 2"}
+                  </p>
+                  <h3 className="font-display text-base font-semibold text-white mb-2">Complete your registration</h3>
+                  <p className="font-sans text-sm text-white/45 leading-relaxed mb-5">
+                    Finish setting up your {plan ? `${plan} ` : ""}membership in our secure registration portal.
+                    You'll bring the form and IDs above to your in-office visit to finish onboarding.
+                  </p>
+                  <a
+                    href={DESKWORKS_SIGNUP_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={btnPrimary}
+                  >
+                    Continue to Registration <ExternalLink size={13} />
+                  </a>
+                </div>
+
                 <button onClick={handleGenerate} className={btnGhost}>
-                  <Download size={13} /> Download again
+                  <Download size={13} /> Download form again
                 </button>
               </div>
             )}

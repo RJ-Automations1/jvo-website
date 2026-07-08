@@ -300,14 +300,12 @@ export default function Pricing() {
               <p className="font-sans text-xs text-black/40 leading-relaxed mb-5 flex items-start gap-1.5">
                 <span className="mt-0.5">📍</span> In-person visit required to complete registration.
               </p>
-              <a
-                href="https://jvo.satellitedeskworks.com/member-sign-up"
-                target="_blank"
-                rel="noopener noreferrer"
+              <Link
+                href="/mailbox-application"
                 className="inline-flex items-center gap-2 font-sans text-xs font-semibold tracking-[0.18em] uppercase border border-black text-black px-6 py-3 hover:bg-black hover:text-white transition-all duration-200"
               >
                 Register Now <ArrowRight size={13} />
-              </a>
+              </Link>
             </div>
           </div>
 

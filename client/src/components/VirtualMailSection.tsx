@@ -4,8 +4,7 @@
  */
 
 import { useRef, useEffect, useState } from "react";
-import { Check, ArrowRight } from "lucide-react";
-import { Link } from "wouter";
+import { Check } from "lucide-react";
 
 const mailFeatures = [
   "Instant app notification when mail arrives",
@@ -75,21 +74,13 @@ export default function VirtualMailSection() {
             </ul>
 
             {/* Pricing callout */}
-            <div className="flex flex-wrap items-end gap-6">
-              <div className="border border-black/15 p-5 inline-block">
-                <p className="section-label mb-1">Corporate Mailing Address</p>
-                <div className="flex items-baseline gap-1">
-                  <span className="font-mono-price text-black text-3xl font-medium">$39</span>
-                  <span className="font-sans text-black/40 text-sm">/month</span>
-                </div>
-                <p className="font-sans text-black/40 text-xs mt-1">No long-term contract required</p>
+            <div className="border border-black/15 p-5 inline-block">
+              <p className="section-label mb-1">Corporate Mailing Address</p>
+              <div className="flex items-baseline gap-1">
+                <span className="font-mono-price text-black text-3xl font-medium">$39</span>
+                <span className="font-sans text-black/40 text-sm">/month</span>
               </div>
-              <Link
-                href="/mailbox-application"
-                className="inline-flex items-center gap-2 font-sans text-xs font-semibold tracking-[0.18em] uppercase bg-black text-white px-6 py-3.5 hover:bg-black/85 transition-colors"
-              >
-                Start Mailbox Application <ArrowRight size={13} />
-              </Link>
+              <p className="font-sans text-black/40 text-xs mt-1">No long-term contract required</p>
             </div>
           </div>
 

@@ -1,14 +1,14 @@
 /*
  * JVO Memberships & Pricing Section — Professional Black / Grey / White
  * Clean editorial pricing cards, no red accents
- * All CTA buttons link to Deskworks signup: https://jvo.satellitedeskworks.com/member-sign-up
+ * Every plan CTA starts onboarding at the mailbox application (USPS Form 1583),
+ * which then continues to Deskworks registration.
  * In-office requirement notice shown below cards
  */
 
 import { useRef, useEffect, useState } from "react";
 import { Check, MapPin, AlertCircle } from "lucide-react";
-
-const DESKWORKS_SIGNUP_URL = "https://jvo.satellitedeskworks.com/member-sign-up";
+import { Link } from "wouter";
 
 const plans = [
   {
@@ -169,10 +169,8 @@ export default function MembershipsSection() {
                 ))}
               </ul>
 
-              <a
-                href={DESKWORKS_SIGNUP_URL}
-                target="_blank"
-                rel="noopener noreferrer"
+              <Link
+                href={`/mailbox-application?plan=${encodeURIComponent(plan.name)}`}
                 className={`w-full py-3.5 font-sans text-xs font-semibold tracking-[0.18em] uppercase border transition-all duration-200 active:scale-[0.97] text-center block ${
                   plan.featured
                     ? "bg-black text-white border-black hover:bg-black/80"
@@ -180,7 +178,7 @@ export default function MembershipsSection() {
                 }`}
               >
                 {plan.cta}
-              </a>
+              </Link>
             </div>
           ))}
         </div>

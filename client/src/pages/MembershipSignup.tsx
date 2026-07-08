@@ -5,7 +5,7 @@
  */
 
 import { useEffect } from "react";
-import { ArrowLeft, ArrowRight, MapPin, ExternalLink } from "lucide-react";
+import { ArrowLeft, ArrowRight, MapPin, ExternalLink, FileText } from "lucide-react";
 import { Link, useSearch } from "wouter";
 
 const DESKWORKS_SIGNUP_URL = "https://jvo.satellitedeskworks.com/member-sign-up";
@@ -79,6 +79,23 @@ export default function MembershipSignup() {
               </p>
             </div>
           </div>
+
+          {/* Mailbox / Form 1583 prep */}
+          <Link
+            href="/mailbox-application"
+            className="flex items-start gap-4 border border-white/15 bg-white/5 px-6 py-5 text-left mt-4 hover:border-white/40 transition-colors group"
+          >
+            <FileText size={16} className="text-white/50 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-sans text-xs font-semibold tracking-[0.15em] uppercase text-white/60 mb-1 group-hover:text-white transition-colors">
+                Getting a Mailbox? Prep Your USPS Form 1583
+              </p>
+              <p className="font-sans text-sm text-white/40 leading-relaxed">
+                Answer a short questionnaire and we'll pre-fill the form USPS requires to receive mail on your behalf — then bring it and your two IDs to your visit.
+              </p>
+            </div>
+            <ArrowRight size={14} className="text-white/40 group-hover:text-white transition-colors flex-shrink-0 mt-0.5 ml-auto" />
+          </Link>
 
           {/* Contact fallback */}
           <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">

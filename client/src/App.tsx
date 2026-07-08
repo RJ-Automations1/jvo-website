@@ -1,6 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
+import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -9,6 +10,9 @@ import Pricing from "./pages/Pricing";
 import BookingPage from "./pages/Booking";
 import MembershipSignup from "./pages/MembershipSignup";
 
+// Lazy — pulls in pdf-lib only when the applicant opens the form.
+const MailboxApplication = lazy(() => import("./pages/MailboxApplication"));
+
 function Router() {
   return (
     <Switch>
@@ -16,6 +20,11 @@ function Router() {
       <Route path={"/pricing"} component={Pricing} />
       <Route path={"/booking"} component={BookingPage} />
       <Route path={"/membership-signup"} component={MembershipSignup} />
+      <Route path={"/mailbox-application"}>
+        <Suspense fallback={<div className="min-h-screen bg-[#0A0A0A]" />}>
+          <MailboxApplication />
+        </Suspense>
+      </Route>
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
     </Switch>

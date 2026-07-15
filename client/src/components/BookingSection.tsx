@@ -1,13 +1,14 @@
 /*
  * JVO Booking / Contact Section — Professional Black / Grey / White
  * Two-column layout: compact reserve CTA + contact info
- * All booking links go to Deskworks portal: https://jvo.satellitedeskworks.com/member-sign-up
+ * Reserve/book CTAs go to the /booking page (live Google Calendar availability).
  */
 
 import { useState, useRef, useEffect } from "react";
 import { Calendar, Clock, Phone, Mail, MapPin, ArrowRight } from "lucide-react";
+import { Link } from "wouter";
 
-const DESKWORKS_RESERVE_URL = "https://jvo.satellitedeskworks.com/member-sign-up";
+const BOOKING_PATH = "/booking";
 
 export default function BookingSection() {
   const ref = useRef<HTMLDivElement>(null);
@@ -68,14 +69,12 @@ export default function BookingSection() {
                 <h3 className="font-display text-2xl font-semibold text-black leading-tight">Reserve a Space</h3>
                 <p className="font-sans text-xs text-black/45 mt-1">Pick a date, choose a time, confirm in minutes.</p>
               </div>
-              <a
-                href={DESKWORKS_RESERVE_URL}
-                target="_blank"
-                rel="noopener noreferrer"
+              <Link
+                href={BOOKING_PATH}
                 className="inline-flex items-center gap-2 font-sans text-[11px] font-semibold tracking-[0.18em] uppercase bg-black text-white px-5 py-3 hover:bg-black/80 transition-all duration-200 flex-shrink-0"
               >
                 Book Space <ArrowRight size={12} />
-              </a>
+              </Link>
             </div>
 
             {/* Quick booking options */}
@@ -89,11 +88,9 @@ export default function BookingSection() {
                 ].map((opt, i) => {
                   const Icon = opt.icon;
                   return (
-                    <a
+                    <Link
                       key={i}
-                      href={DESKWORKS_RESERVE_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                      href={BOOKING_PATH}
                       className="flex items-center gap-4 border border-black/10 p-4 hover:border-black/30 transition-all duration-200 group"
                     >
                       <div className="w-9 h-9 border border-black/15 flex items-center justify-center flex-shrink-0 group-hover:border-black/40 transition-colors">
@@ -103,7 +100,7 @@ export default function BookingSection() {
                         <div className="font-sans font-semibold text-black text-sm">{opt.label}</div>
                         <div className="font-sans text-black/45 text-xs">{opt.desc}</div>
                       </div>
-                    </a>
+                    </Link>
                   );
                 })}
               </div>

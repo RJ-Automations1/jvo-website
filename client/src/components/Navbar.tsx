@@ -5,6 +5,7 @@
 
 import { useState, useEffect } from "react";
 import { Menu, X } from "lucide-react";
+import { Link } from "wouter";
 
 const navLinks = [
   { label: "Services", href: "#services" },
@@ -96,10 +97,8 @@ export default function Navbar() {
 
             {/* CTA */}
             <div className="hidden lg:flex items-center gap-3 ml-8">
-              <a
-                href="https://jvo.satellitedeskworks.com/member-sign-up"
-                target="_blank"
-                rel="noopener noreferrer"
+              <Link
+                href="/booking"
                 className={`font-sans text-[11px] font-semibold tracking-[0.18em] uppercase px-5 py-2.5 transition-all duration-200 ${
                   scrolled
                     ? "bg-black text-white hover:bg-black/80"
@@ -107,7 +106,7 @@ export default function Navbar() {
                 }`}
               >
                 Reserve a Space
-              </a>
+              </Link>
               <button
                 onClick={() => handleNavClick("#memberships")}
                 className={`font-sans text-[11px] font-semibold tracking-[0.18em] uppercase px-5 py-2.5 border transition-all duration-200 ${

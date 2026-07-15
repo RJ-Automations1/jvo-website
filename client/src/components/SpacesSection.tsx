@@ -182,14 +182,12 @@ function PlaceholderCard({ space, isMember, index }: { space: Space; isMember: b
             View Prices <ArrowRight size={13} className="group-hover/btn:translate-x-1 transition-transform" />
           </Link>
           <span className="text-black/20 text-xs">|</span>
-          <a
-            href="https://jvo.satellitedeskworks.com/member-sign-up"
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            href="/booking"
             className="flex items-center gap-2 font-sans text-xs font-semibold tracking-[0.15em] uppercase text-black/50 hover:text-black hover:gap-3 transition-all duration-200 group/btn2"
           >
             Reserve <ArrowRight size={13} className="group-hover/btn2:translate-x-1 transition-transform" />
-          </a>
+          </Link>
         </div>
       </div>
     </div>
@@ -269,14 +267,12 @@ function SpaceCard({ space, isMember, index }: { space: Space; isMember: boolean
             View Prices <ArrowRight size={13} className="group-hover/btn:translate-x-1 transition-transform" />
           </Link>
           <span className="text-black/20 text-xs">|</span>
-          <a
-            href="https://jvo.satellitedeskworks.com/member-sign-up"
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            href="/booking"
             className="flex items-center gap-2 font-sans text-xs font-semibold tracking-[0.15em] uppercase text-black/50 hover:text-black hover:gap-3 transition-all duration-200 group/btn2"
           >
             Reserve <ArrowRight size={13} className="group-hover/btn2:translate-x-1 transition-transform" />
-          </a>
+          </Link>
         </div>
       </div>
     </div>

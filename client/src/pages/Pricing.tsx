@@ -282,14 +282,12 @@ export default function Pricing() {
               <p className="font-sans text-sm text-black/50 leading-relaxed mb-6">
                 Submit a reservation request for any space. We'll confirm within 24 hours.
               </p>
-              <a
-                href="https://jvo.satellitedeskworks.com/member-sign-up"
-                target="_blank"
-                rel="noopener noreferrer"
+              <Link
+                href="/booking"
                 className="inline-flex items-center gap-2 font-sans text-xs font-semibold tracking-[0.18em] uppercase bg-black text-white px-6 py-3 hover:bg-black/80 transition-all duration-200"
               >
                 Reserve Now <ArrowRight size={13} />
-              </a>
+              </Link>
             </div>
             <div className="bg-[#F5F5F3] p-8">
               <p className="font-sans text-[10px] font-semibold tracking-[0.2em] uppercase text-black/40 mb-2">Save on Every Visit</p>

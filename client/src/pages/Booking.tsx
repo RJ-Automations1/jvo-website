@@ -8,11 +8,28 @@
 import { useState, useMemo, useEffect } from "react";
 import {
   Check, ChevronLeft, ChevronRight, ArrowLeft,
-  ArrowRight, Lock, Tag, User
+  ArrowRight, Lock, Tag, User, CalendarDays
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+
+/*
+ * ── Google Calendar connection ──────────────────────────────────────────────
+ * JVO_CALENDAR_EMBED: read-only view of the client's live JVO calendar
+ * (jonesborovirtualoffice@gmail.com). Shows customers what's already booked.
+ * NOTE: this only renders publicly if that calendar's sharing is set to
+ * "Make available to public" in Google Calendar → Settings → Access permissions.
+ *
+ * APPOINTMENT_BOOKING_URL: paste the client's Google Appointment Schedule link
+ * here (looks like https://calendar.app.google/XXXX). That page lets customers
+ * self-book AND automatically refuses anything that would double-book the
+ * calendar. Once set, an "Instant Book" button appears below. Until then,
+ * customers see live availability + submit a request we confirm manually.
+ */
+const JVO_CALENDAR_EMBED =
+  "https://calendar.google.com/calendar/embed?src=1830514f596a30e51ac9c83a2700e915b87ddd99115031e62d788dde64733d57%40group.calendar.google.com&ctz=America%2FNew_York&mode=WEEK";
+const APPOINTMENT_BOOKING_URL = "";
 
 type SpaceOption = {
   id: string;
@@ -207,6 +224,44 @@ export default function BookingPage() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* ── Live availability from the JVO Google Calendar ── */}
+          <div className="bg-white border border-black/10 p-6 mb-6">
+            <div className="flex items-center gap-3 mb-4">
+              <CalendarDays size={16} className="text-black/40" />
+              <h3 className="font-display text-base font-semibold text-black">Live Availability</h3>
+              <span className="ml-auto font-sans text-[10px] font-semibold tracking-[0.15em] uppercase text-black/35">
+                Synced with our Google Calendar
+              </span>
+            </div>
+
+            {APPOINTMENT_BOOKING_URL && (
+              <a
+                href={APPOINTMENT_BOOKING_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mb-4 w-full flex items-center justify-center gap-2 font-sans text-xs font-semibold tracking-[0.18em] uppercase bg-black text-white py-3.5 hover:bg-black/80 transition-all duration-200"
+              >
+                Book Instantly — No Double-Booking <ArrowRight size={13} />
+              </a>
+            )}
+
+            <div className="w-full overflow-hidden border border-black/10">
+              <iframe
+                title="JVO Live Calendar"
+                src={JVO_CALENDAR_EMBED}
+                className="w-full"
+                style={{ height: 500, border: 0 }}
+                loading="lazy"
+              />
+            </div>
+            <p className="font-sans text-[11px] text-black/40 mt-3 leading-relaxed">
+              The calendar above reflects current bookings in real time.
+              {APPOINTMENT_BOOKING_URL
+                ? " Use “Book Instantly” to reserve an open slot."
+                : " Pick an open slot and submit the request below — we confirm within 24 hours."}
+            </p>
           </div>
 
           <form onSubmit={handleSubmit}>

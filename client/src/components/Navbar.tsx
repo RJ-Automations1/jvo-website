@@ -82,15 +82,18 @@ export default function Navbar() {
                 </li>
               ))}
               <li>
+                {/* Gold, like the Weddings tab on the events site — a doorway to the sister brand. */}
                 <a
                   href={JVO_EVENTS_URL}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`font-sans text-[11px] font-medium tracking-[0.18em] uppercase transition-all duration-200 hover:opacity-50 ${
-                    scrolled ? "text-black" : "text-white"
-                  }`}
+                  className="group flex items-baseline gap-1 font-sans text-[11px] font-semibold tracking-[0.18em] uppercase transition-all duration-200 hover:opacity-70"
+                  style={{ color: "#c9a96a" }}
                 >
                   JVO Events
+                  <span className="text-[#c9a96a]/70 transition-transform group-hover:translate-x-0.5" aria-hidden="true">
+                    ↗
+                  </span>
                 </a>
               </li>
             </ul>
@@ -154,9 +157,10 @@ export default function Navbar() {
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setMobileOpen(false)}
-              className="text-left font-display text-5xl font-medium text-black py-4 border-b border-black/10 hover:pl-4 transition-all duration-200 block"
+              className="text-left font-display text-5xl font-medium py-4 border-b border-black/10 hover:pl-4 transition-all duration-200 block"
+              style={{ color: "#c9a96a" }}
             >
-              JVO Events
+              JVO Events <span aria-hidden="true">↗</span>
             </a>
             <button
               onClick={() => handleNavClick("#memberships")}

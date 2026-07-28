@@ -14,7 +14,7 @@ const navLinks = [
   { label: "Contact", href: "#contact" },
 ];
 
-const JVO_EVENTS_URL = "https://jvo-events.onrender.com";
+const JVO_EVENTS_URL = "https://jvoevents.com";
 
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);

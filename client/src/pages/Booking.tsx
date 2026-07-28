@@ -85,6 +85,8 @@ export default function BookingPage() {
   const [phone,          setPhone]          = useState("");
   const [notes,          setNotes]          = useState("");
   const [submitted,      setSubmitted]      = useState(false);
+  const [submitting,     setSubmitting]     = useState(false);
+  const [bookError,      setBookError]      = useState("");
 
   useEffect(() => { window.scrollTo({ top: 0 }); }, []);
 
@@ -122,10 +124,45 @@ export default function BookingPage() {
     ? (selectedSpace.nonMemberPrice - selectedSpace.memberPrice) * hours
     : 0;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // YYYY-MM-DD for the selected day (local, no timezone drift)
+  const isoDate = selectedDay
+    ? `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(selectedDay).padStart(2, "0")}`
+    : "";
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedDay) return;
-    setSubmitted(true);
+    if (!selectedDay || submitting) return;
+    setBookError("");
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/book", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name, email, phone, notes,
+          space: selectedSpace.name,
+          date: isoDate,
+          startTime,
+          hours,
+        }),
+      });
+      const data = await res.json().catch(() => ({} as { error?: string }));
+      if (!res.ok) {
+        // 409 = slot taken; other errors (incl. API not yet live) fall back to a call-us message.
+        setBookError(
+          data.error ||
+            "Online booking is being set up. Please call (678) 519-4723 to reserve your space."
+        );
+        return;
+      }
+      setSubmitted(true);
+    } catch {
+      setBookError(
+        "Couldn't reach the booking system. Please try again, or call (678) 519-4723 to reserve."
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   /* ── Success Screen ── */
@@ -139,11 +176,12 @@ export default function BookingPage() {
               <div className="w-14 h-14 bg-black flex items-center justify-center mx-auto mb-6">
                 <Check size={24} className="text-white" />
               </div>
-              <h2 className="font-display text-3xl font-semibold text-black mb-3">Request Received</h2>
+              <h2 className="font-display text-3xl font-semibold text-black mb-3">Booking Confirmed</h2>
               <p className="font-sans text-sm text-black/55 leading-relaxed mb-8">
-                Thank you, <strong>{name}</strong>. We've received your reservation request for the{" "}
+                Thank you, <strong>{name}</strong>. Your reservation for the{" "}
                 <strong>{selectedSpace.name}</strong> on <strong>{selectedDateStr}</strong> at{" "}
-                <strong>{startTime}</strong>. We'll confirm your booking within 24 hours.
+                <strong>{startTime}</strong> is booked and on our calendar. A confirmation is on its way to{" "}
+                <strong>{email}</strong>.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <button
@@ -260,7 +298,7 @@ export default function BookingPage() {
               The calendar above reflects current bookings in real time.
               {APPOINTMENT_BOOKING_URL
                 ? " Use “Book Instantly” to reserve an open slot."
-                : " Pick an open slot and submit the request below — we confirm within 24 hours."}
+                : " Pick an open slot below — your reservation is checked against the calendar and booked instantly, so nothing gets double-booked."}
             </p>
           </div>
 
@@ -496,16 +534,25 @@ export default function BookingPage() {
                   </div>
 
                   {/* Submit */}
+                  {bookError && (
+                    <p className="font-sans text-xs text-red-600 bg-red-50 border border-red-200 px-3 py-2.5 leading-relaxed">
+                      {bookError}
+                    </p>
+                  )}
                   <button
                     type="submit"
-                    disabled={!selectedDay}
+                    disabled={!selectedDay || submitting}
                     className={`w-full flex items-center justify-center gap-2 font-sans text-xs font-semibold tracking-[0.18em] uppercase py-3.5 transition-all duration-200 active:scale-[0.98] ${
-                      selectedDay
+                      selectedDay && !submitting
                         ? "bg-black text-white hover:bg-black/80"
                         : "bg-black/15 text-black/30 cursor-not-allowed"
                     }`}
                   >
-                    {selectedDay ? <><span>Request Reservation</span><ArrowRight size={13} /></> : "Select a Date First"}
+                    {submitting
+                      ? "Booking…"
+                      : selectedDay
+                      ? <><span>Confirm Reservation</span><ArrowRight size={13} /></>
+                      : "Select a Date First"}
                   </button>
 
                   {!isMember && (

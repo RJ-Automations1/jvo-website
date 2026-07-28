@@ -23,5 +23,9 @@ export default defineConfig({
     port: 3000,
     strictPort: false,
     host: true,
+    // In dev, proxy booking API calls to the Express server (pnpm dev:server on 3001).
+    proxy: {
+      "/api": "http://localhost:3001",
+    },
   },
 });

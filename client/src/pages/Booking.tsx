@@ -146,8 +146,14 @@ export default function BookingPage() {
           hours,
         }),
       });
-      const data = await res.json().catch(() => ({} as { error?: string }));
-      if (!res.ok) {
+      // A static-only deploy has no /api/book, and the SPA rewrite answers the
+      // POST with index.html and a 200 — so res.ok alone is NOT proof the
+      // booking was recorded. Require a JSON body before trusting it.
+      const isJson = (res.headers.get("content-type") || "").includes("application/json");
+      const data = isJson
+        ? await res.json().catch(() => ({}) as { error?: string })
+        : ({} as { error?: string });
+      if (!res.ok || !isJson) {
         // 409 = slot taken; other errors (incl. API not yet live) fall back to a call-us message.
         setBookError(
           data.error ||

@@ -98,19 +98,36 @@ function instantToDayMinutes(instant: Date, dateStr: string): number {
   return Math.max(0, Math.min(24 * 60, mins));
 }
 
+type FreeBusyCalendar = {
+  busy?: { start: string; end: string }[];
+  errors?: { domain: string; reason: string }[];
+};
+
 async function freeBusy(client: JWT, timeMin: string, timeMax: string) {
-  const res = await client.request<{ calendars: Record<string, { busy: { start: string; end: string }[] }> }>({
+  const res = await client.request<{ calendars: Record<string, FreeBusyCalendar> }>({
     url: `${CAL_BASE}/freeBusy`,
     method: "POST",
     data: { timeMin, timeMax, timeZone: TIME_ZONE, items: [{ id: CALENDAR_ID }] },
   });
-  return res.data.calendars[CALENDAR_ID]?.busy ?? [];
+  const cal = res.data.calendars[CALENDAR_ID];
+  /*
+   * A calendar the service account can't see comes back 200 with an `errors`
+   * array (reason "notFound") and NO busy list. Falling through to [] would
+   * read as "the whole day is free" and let us double-book every slot, so a
+   * per-calendar error has to be as loud as a failed request.
+   */
+  if (!cal || cal.errors?.length) {
+    const why = cal?.errors?.map((e) => e.reason).join(", ") || "no response for calendar";
+    throw new Error(`freeBusy failed for ${CALENDAR_ID}: ${why}`);
+  }
+  return cal.busy ?? [];
 }
 
 /* ── Server ──────────────────────────────────────────────────────────── */
 async function startServer() {
   const app = express();
   const server = createServer(app);
+
   app.use(express.json());
 
   // Availability for a given day

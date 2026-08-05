@@ -105,6 +105,9 @@ temp/
 *.sqlite
 *.sqlite3
 
+# Membership pipeline local data (SQLite DB + document uploads)
+data/
+
 # Webdev artifacts (checkpoint zips, migrations, etc.)
 .webdev/
 

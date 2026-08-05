@@ -15,6 +15,9 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { JWT } from "google-auth-library";
+import { memberAdminRouter } from "./memberAdmin.js";
+import { onboardRouter } from "./memberPortal.js";
+import { initMemberScheduler } from "./memberScheduler.js";
 import {
   JVO_OFFICE_CALENDAR_ID,
   TIME_ZONE as DEFAULT_TIME_ZONE,
@@ -266,6 +269,13 @@ async function startServer() {
     bookingChain = run.catch(() => undefined);
     await run;
   });
+
+  // Membership-activation pipeline: staff dashboard (/admin, Basic Auth) and
+  // the member onboarding portal (/onboard/:token). Mounted BEFORE the static
+  // frontend + SPA fallback so their routes are never swallowed by index.html.
+  app.use(memberAdminRouter);
+  app.use(onboardRouter);
+  initMemberScheduler();
 
   // Static frontend (built by Vite to dist/public).
   const staticPath =

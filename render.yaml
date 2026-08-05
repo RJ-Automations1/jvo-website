@@ -1,4 +1,5 @@
-# Render Blueprint — Node web service (serves the built frontend + booking API).
+# Render Blueprint — Node web service (serves the built frontend + booking API
+# + the membership-activation pipeline: /admin dashboard, /onboard portal).
 services:
   - type: web
     name: jvo-website
@@ -6,9 +7,16 @@ services:
     buildCommand: npm install -g pnpm@10.4.1 && pnpm install && pnpm build
     startCommand: pnpm start
     autoDeploy: true
+    # Persistent disk for the members SQLite DB + document uploads.
+    disk:
+      name: jvo-member-data
+      mountPath: /data
+      sizeGB: 1
     envVars:
+      # Node 24 — better-sqlite3 13 SEGFAULTS under Render's Node 20 (verified
+      # painfully on the jvo-events service). Do NOT downgrade.
       - key: NODE_VERSION
-        value: "20.18.0"
+        value: "24"
       # Google service-account JSON (same account as JVO Events). SECRET — set in
       # the Render dashboard, do NOT commit. Paste the full key file contents.
       - key: GOOGLE_SERVICE_ACCOUNT_JSON
@@ -20,3 +28,21 @@ services:
         value: "5e39a34a1b48df3ae7baa65d57b57d2ce46e482a040985343617c96dbdc5004e@group.calendar.google.com"
       - key: JVO_TIMEZONE
         value: "America/New_York"
+      # --- Membership-activation pipeline ---
+      - key: DB_PATH
+        value: /data/jvo-members.db
+      - key: UPLOADS_DIR
+        value: /data/uploads
+      # Staff dashboard Basic Auth — SECRET, set in the Render dashboard.
+      - key: ADMIN_USER
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      # Kill switch: while "false" every member email is a dry-run log line.
+      - key: MEMBER_EMAILS_ENABLED
+        value: "false"
+      # Gmail app-password SMTP (same creds as the jvo-events service) — SECRET.
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false

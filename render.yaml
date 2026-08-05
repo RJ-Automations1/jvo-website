@@ -21,9 +21,11 @@ services:
       # the Render dashboard, do NOT commit. Paste the full key file contents.
       - key: GOOGLE_SERVICE_ACCOUNT_JSON
         sync: false
-      # Calendar that bookings are checked against + written to.
+      # The "JVO Office" calendar — bookings are checked against + written to it.
+      # It must be shared with the service account ("Make changes to events")
+      # or free/busy lookups will 404.
       - key: JVO_CALENDAR_ID
-        value: "1830514f596a30e51ac9c83a2700e915b87ddd99115031e62d788dde64733d57@group.calendar.google.com"
+        value: "5e39a34a1b48df3ae7baa65d57b57d2ce46e482a040985343617c96dbdc5004e@group.calendar.google.com"
       - key: JVO_TIMEZONE
         value: "America/New_York"
       # --- Membership-activation pipeline ---

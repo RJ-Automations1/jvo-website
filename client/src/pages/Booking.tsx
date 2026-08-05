@@ -5,7 +5,7 @@
  * Design: Professional Black / Grey / White
  */
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import {
   Check, ChevronLeft, ChevronRight, ArrowLeft,
   ArrowRight, Lock, Tag, User, CalendarDays
@@ -13,23 +13,37 @@ import {
 import { Link, useLocation } from "wouter";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import {
+  JVO_OFFICE_CALENDAR_ID,
+  TIME_ZONE,
+  DAYS_LABEL,
+  HOURS_LABEL,
+  isOpenDay,
+  parseTimeToMinutes,
+  startTimesFor,
+  DEFAULT_START_TIME,
+  MAX_HOURS,
+} from "@shared/booking";
 
 /*
  * ── Google Calendar connection ──────────────────────────────────────────────
- * JVO_CALENDAR_EMBED: read-only view of the client's live JVO calendar
- * (jonesborovirtualoffice@gmail.com). Shows customers what's already booked.
- * NOTE: this only renders publicly if that calendar's sharing is set to
+ * The embed is a read-only view of the "JVO Office" calendar — the same one
+ * /api/book writes to — so customers see exactly what's already taken.
+ * NOTE: it only renders publicly if that calendar's sharing is set to
  * "Make available to public" in Google Calendar → Settings → Access permissions.
  *
  * APPOINTMENT_BOOKING_URL: paste the client's Google Appointment Schedule link
- * here (looks like https://calendar.app.google/XXXX). That page lets customers
- * self-book AND automatically refuses anything that would double-book the
- * calendar. Once set, an "Instant Book" button appears below. Until then,
- * customers see live availability + submit a request we confirm manually.
+ * here (looks like https://calendar.app.google/XXXX). Once set, an "Instant
+ * Book" button appears below alongside the form.
  */
-const JVO_CALENDAR_EMBED =
-  "https://calendar.google.com/calendar/embed?src=1830514f596a30e51ac9c83a2700e915b87ddd99115031e62d788dde64733d57%40group.calendar.google.com&ctz=America%2FNew_York&mode=WEEK";
+const JVO_CALENDAR_EMBED = JVO_OFFICE_CALENDAR_ID
+  ? `https://calendar.google.com/calendar/embed?src=${encodeURIComponent(
+      JVO_OFFICE_CALENDAR_ID,
+    )}&ctz=${encodeURIComponent(TIME_ZONE)}&mode=WEEK`
+  : "";
 const APPOINTMENT_BOOKING_URL = "";
+
+type BusyBlock = { start: number; end: number };
 
 type SpaceOption = {
   id: string;
@@ -46,12 +60,6 @@ const spaceOptions: SpaceOption[] = [
   { id: "private-large",   name: "Private Office — Large",   memberPrice: 15,  nonMemberPrice: 35,  minHours: 1 },
   { id: "content-studio",  name: "Content Studio",           memberPrice: 25,  nonMemberPrice: 40,  minHours: 1 },
   { id: "corporate-event", name: "Corporate Event Space",    memberPrice: 75,  nonMemberPrice: 150, minHours: 2 },
-];
-
-const timeSlots = [
-  "8:00 AM","9:00 AM","10:00 AM","11:00 AM",
-  "12:00 PM","1:00 PM","2:00 PM","3:00 PM",
-  "4:00 PM","5:00 PM","6:00 PM","7:00 PM",
 ];
 
 const DAYS   = ["Su","Mo","Tu","We","Th","Fr","Sa"];
@@ -79,7 +87,9 @@ export default function BookingPage() {
   const [calYear,        setCalYear]        = useState(today.getFullYear());
   const [calMonth,       setCalMonth]       = useState(today.getMonth());
   const [selectedDay,    setSelectedDay]    = useState<number | null>(null);
-  const [startTime,      setStartTime]      = useState("9:00 AM");
+  const [startTime,      setStartTime]      = useState(DEFAULT_START_TIME);
+  const [busyBlocks,     setBusyBlocks]     = useState<BusyBlock[]>([]);
+  const [loadingSlots,   setLoadingSlots]   = useState(false);
   const [name,           setName]           = useState("");
   const [email,          setEmail]          = useState("");
   const [phone,          setPhone]          = useState("");
@@ -101,6 +111,9 @@ export default function BookingPage() {
     const t = new Date(); t.setHours(0, 0, 0, 0);
     return cell < t;
   };
+
+  // Closed weekends — those dates aren't selectable at all.
+  const isClosed = (d: number) => !isOpenDay(new Date(calYear, calMonth, d).getDay());
 
   const prevMonth = () => {
     if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); }
@@ -128,6 +141,43 @@ export default function BookingPage() {
   const isoDate = selectedDay
     ? `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(selectedDay).padStart(2, "0")}`
     : "";
+
+  // What's already on the JVO Office calendar for the chosen day, as
+  // minutes-past-midnight in office time (the server does the timezone math).
+  const refreshAvailability = useCallback(async () => {
+    if (!isoDate) { setBusyBlocks([]); return; }
+    setLoadingSlots(true);
+    try {
+      const r = await fetch(`/api/availability?date=${isoDate}`);
+      const d = r.ok ? await r.json() : null;
+      setBusyBlocks(Array.isArray(d?.busyMinutes) ? d.busyMinutes : []);
+    } catch {
+      // The API being unreachable shouldn't lock the form — the server
+      // re-checks for conflicts on submit either way.
+      setBusyBlocks([]);
+    } finally {
+      setLoadingSlots(false);
+    }
+  }, [isoDate]);
+
+  useEffect(() => { void refreshAvailability(); }, [refreshAvailability]);
+
+  // Start times that still finish by closing time for a booking this long.
+  const availableStartTimes = useMemo(() => startTimesFor(hours), [hours]);
+
+  const isSlotTaken = (slot: string) => {
+    const start = parseTimeToMinutes(slot);
+    const end = start + hours * 60;
+    return busyBlocks.some((b) => b.start < end && b.end > start);
+  };
+
+  // A longer booking can strand the current start time past closing — when it
+  // does, slide the start back to the latest one that still fits.
+  useEffect(() => {
+    if (!availableStartTimes.includes(startTime) && availableStartTimes.length) {
+      setStartTime(availableStartTimes[availableStartTimes.length - 1]);
+    }
+  }, [availableStartTimes, startTime]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,6 +211,8 @@ export default function BookingPage() {
             ? data.error
             : "Online booking is being set up. Please call (678) 519-4723 to reserve your space."
         );
+        // Someone beat us to it — repaint the grid so the taken slot greys out.
+        if (res.status === 409) void refreshAvailability();
         return;
       }
       setSubmitted(true);
@@ -294,20 +346,22 @@ export default function BookingPage() {
               </a>
             )}
 
-            <div className="w-full overflow-hidden border border-black/10">
-              <iframe
-                title="JVO Live Calendar"
-                src={JVO_CALENDAR_EMBED}
-                className="w-full"
-                style={{ height: 500, border: 0 }}
-                loading="lazy"
-              />
-            </div>
+            {JVO_CALENDAR_EMBED && (
+              <div className="w-full overflow-hidden border border-black/10">
+                <iframe
+                  title="JVO Office Calendar"
+                  src={JVO_CALENDAR_EMBED}
+                  className="w-full"
+                  style={{ height: 500, border: 0 }}
+                  loading="lazy"
+                />
+              </div>
+            )}
             <p className="font-sans text-[11px] text-black/40 mt-3 leading-relaxed">
-              The calendar above reflects current bookings in real time.
+              We're open {DAYS_LABEL}, {HOURS_LABEL}.
               {APPOINTMENT_BOOKING_URL
                 ? " Use “Book Instantly” to reserve an open slot."
-                : " Pick an open slot below — your reservation is checked against the calendar and booked instantly, so nothing gets double-booked."}
+                : " Times already taken are greyed out below — your reservation is re-checked against the calendar the moment you confirm, so nothing gets double-booked."}
             </p>
           </div>
 
@@ -384,21 +438,24 @@ export default function BookingPage() {
                         {cells.map((day, idx) => {
                           if (!day) return <div key={idx} />;
                           const past     = isPast(day);
+                          const closed   = isClosed(day);
+                          const blocked  = past || closed;
                           const todayCell = isToday(day);
                           const selected = selectedDay === day;
                           return (
                             <button
                               key={idx}
                               type="button"
-                              disabled={past}
+                              disabled={blocked}
+                              title={closed && !past ? `Closed — we're open ${DAYS_LABEL}` : undefined}
                               onClick={() => setSelectedDay(day)}
                               className={`
                                 relative aspect-square flex items-center justify-center
                                 font-sans text-xs font-medium transition-all duration-100
-                                ${past ? "text-black/20 cursor-not-allowed" : "cursor-pointer"}
+                                ${blocked ? "text-black/20 cursor-not-allowed" : "cursor-pointer"}
                                 ${selected
                                   ? "bg-black text-white"
-                                  : past ? ""
+                                  : blocked ? ""
                                   : todayCell
                                   ? "border border-black text-black hover:bg-black hover:text-white"
                                   : "text-black hover:bg-black/8"
@@ -420,9 +477,12 @@ export default function BookingPage() {
                         </p>
                       ) : (
                         <p className="font-sans text-[11px] text-black/30 mt-2 text-center italic">
-                          Click a date to select
+                          Click a weekday to select
                         </p>
                       )}
+                      <p className="font-sans text-[10px] text-black/35 mt-1 text-center">
+                        {DAYS_LABEL} · {HOURS_LABEL}
+                      </p>
                     </div>
 
                     {/* Time + Duration */}
@@ -430,23 +490,40 @@ export default function BookingPage() {
                       <div>
                         <label className="block font-sans text-[10px] font-semibold tracking-[0.18em] uppercase text-black/40 mb-2">
                           Start Time
+                          {loadingSlots && (
+                            <span className="ml-2 normal-case tracking-normal font-normal text-black/30">
+                              checking calendar…
+                            </span>
+                          )}
                         </label>
                         <div className="grid grid-cols-3 gap-1.5">
-                          {timeSlots.map((t) => (
-                            <button
-                              key={t}
-                              type="button"
-                              onClick={() => setStartTime(t)}
-                              className={`py-2 font-sans text-[11px] font-medium border transition-all duration-100 ${
-                                startTime === t
-                                  ? "bg-black text-white border-black"
-                                  : "border-black/12 text-black/60 hover:border-black/40 hover:text-black"
-                              }`}
-                            >
-                              {t}
-                            </button>
-                          ))}
+                          {availableStartTimes.map((t) => {
+                            const taken = isSlotTaken(t);
+                            return (
+                              <button
+                                key={t}
+                                type="button"
+                                disabled={taken}
+                                title={taken ? "Already booked" : undefined}
+                                onClick={() => setStartTime(t)}
+                                className={`py-2 font-sans text-[11px] font-medium border transition-all duration-100 ${
+                                  taken
+                                    ? "border-black/8 text-black/20 line-through cursor-not-allowed bg-black/[0.02]"
+                                    : startTime === t
+                                    ? "bg-black text-white border-black"
+                                    : "border-black/12 text-black/60 hover:border-black/40 hover:text-black"
+                                }`}
+                              >
+                                {t}
+                              </button>
+                            );
+                          })}
                         </div>
+                        {selectedDay && !loadingSlots && availableStartTimes.every(isSlotTaken) && (
+                          <p className="font-sans text-[11px] text-black/45 mt-2 leading-relaxed">
+                            Every {hours}-hour slot is taken that day. Try a shorter booking or another date.
+                          </p>
+                        )}
                       </div>
 
                       <div>
@@ -464,11 +541,14 @@ export default function BookingPage() {
                             <span className="font-sans text-xs text-black/40 ml-1">hr{hours > 1 ? "s" : ""}</span>
                           </div>
                           <button type="button"
-                            onClick={() => setHours(Math.min(12, hours + 1))}
+                            onClick={() => setHours(Math.min(MAX_HOURS, hours + 1))}
                             className="w-10 h-10 flex items-center justify-center text-black/40 hover:text-black hover:bg-black/5 transition-colors text-lg">
                             +
                           </button>
                         </div>
+                        <p className="font-sans text-[10px] text-black/35 mt-1.5">
+                          Up to {MAX_HOURS} hours — every booking ends by 4:30 PM.
+                        </p>
                       </div>
                     </div>
                   </div>

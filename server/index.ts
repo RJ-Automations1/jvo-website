@@ -18,14 +18,26 @@ import { JWT } from "google-auth-library";
 import { memberAdminRouter } from "./memberAdmin.js";
 import { onboardRouter } from "./memberPortal.js";
 import { initMemberScheduler } from "./memberScheduler.js";
+import {
+  JVO_OFFICE_CALENDAR_ID,
+  TIME_ZONE as DEFAULT_TIME_ZONE,
+  OPEN_MINUTES,
+  CLOSE_MINUTES,
+  MAX_HOURS,
+  START_TIMES,
+  isOpenDay,
+  dayOfWeekFor,
+  parseTimeToMinutes,
+  validateBookingWindow,
+} from "../shared/booking.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const CALENDAR_ID =
-  process.env.JVO_CALENDAR_ID ||
-  "1830514f596a30e51ac9c83a2700e915b87ddd99115031e62d788dde64733d57@group.calendar.google.com";
-const TIME_ZONE = process.env.JVO_TIMEZONE || "America/New_York";
+// The "JVO Office" calendar. No fallback on purpose — if it isn't configured we
+// refuse to book rather than write onto whatever calendar was here before.
+const CALENDAR_ID = process.env.JVO_CALENDAR_ID || JVO_OFFICE_CALENDAR_ID;
+const TIME_ZONE = process.env.JVO_TIMEZONE || DEFAULT_TIME_ZONE;
 const CAL_BASE = "https://www.googleapis.com/calendar/v3";
 
 /* ── Service-account auth ─────────────────────────────────────────────── */
@@ -44,6 +56,10 @@ function loadServiceAccount(): { client_email: string; private_key: string } | n
 let jwtClient: JWT | null = null;
 function getClient(): JWT | null {
   if (jwtClient) return jwtClient;
+  if (!CALENDAR_ID) {
+    console.error("JVO_CALENDAR_ID is not set — booking is disabled.");
+    return null;
+  }
   const sa = loadServiceAccount();
   if (!sa) return null;
   jwtClient = new JWT({
@@ -74,28 +90,47 @@ function wallToInstant(dateStr: string, hour: number, minute: number, tz: string
   return new Date(utcGuess - off);
 }
 
-// "9:00 AM" -> { hour, minute } in 24h
-function parseTime(t: string): { hour: number; minute: number } {
-  const m = t.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (!m) throw new Error(`Bad time: ${t}`);
-  let hour = +m[1] % 12;
-  if (/pm/i.test(m[3])) hour += 12;
-  return { hour, minute: +m[2] };
+/*
+ * An instant -> minutes past midnight on `dateStr` in the office timezone,
+ * clamped to the day. Lets the browser reason about busy blocks in office time
+ * without knowing anything about timezones itself.
+ */
+function instantToDayMinutes(instant: Date, dateStr: string): number {
+  const dayStart = wallToInstant(dateStr, 0, 0, TIME_ZONE);
+  const mins = Math.round((instant.getTime() - dayStart.getTime()) / 60000);
+  return Math.max(0, Math.min(24 * 60, mins));
 }
 
+type FreeBusyCalendar = {
+  busy?: { start: string; end: string }[];
+  errors?: { domain: string; reason: string }[];
+};
+
 async function freeBusy(client: JWT, timeMin: string, timeMax: string) {
-  const res = await client.request<{ calendars: Record<string, { busy: { start: string; end: string }[] }> }>({
+  const res = await client.request<{ calendars: Record<string, FreeBusyCalendar> }>({
     url: `${CAL_BASE}/freeBusy`,
     method: "POST",
     data: { timeMin, timeMax, timeZone: TIME_ZONE, items: [{ id: CALENDAR_ID }] },
   });
-  return res.data.calendars[CALENDAR_ID]?.busy ?? [];
+  const cal = res.data.calendars[CALENDAR_ID];
+  /*
+   * A calendar the service account can't see comes back 200 with an `errors`
+   * array (reason "notFound") and NO busy list. Falling through to [] would
+   * read as "the whole day is free" and let us double-book every slot, so a
+   * per-calendar error has to be as loud as a failed request.
+   */
+  if (!cal || cal.errors?.length) {
+    const why = cal?.errors?.map((e) => e.reason).join(", ") || "no response for calendar";
+    throw new Error(`freeBusy failed for ${CALENDAR_ID}: ${why}`);
+  }
+  return cal.busy ?? [];
 }
 
 /* ── Server ──────────────────────────────────────────────────────────── */
 async function startServer() {
   const app = express();
   const server = createServer(app);
+
   app.use(express.json());
 
   // Availability for a given day
@@ -105,10 +140,26 @@ async function startServer() {
     const date = String(req.query.date || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
     try {
+      const open = isOpenDay(dayOfWeekFor(date));
+      if (!open) {
+        return res.json({ date, timeZone: TIME_ZONE, open: false, openMinutes: OPEN_MINUTES, closeMinutes: CLOSE_MINUTES, busy: [], busyMinutes: [] });
+      }
       const start = wallToInstant(date, 0, 0, TIME_ZONE);
       const end = wallToInstant(date, 24, 0, TIME_ZONE);
       const busy = await freeBusy(client, start.toISOString(), end.toISOString());
-      res.json({ date, timeZone: TIME_ZONE, busy });
+      const busyMinutes = busy.map((b) => ({
+        start: instantToDayMinutes(new Date(b.start), date),
+        end: instantToDayMinutes(new Date(b.end), date),
+      }));
+      res.json({
+        date,
+        timeZone: TIME_ZONE,
+        open: true,
+        openMinutes: OPEN_MINUTES,
+        closeMinutes: CLOSE_MINUTES,
+        busy,
+        busyMinutes,
+      });
     } catch (e: any) {
       console.error("availability error", e?.message);
       res.status(502).json({ error: "Could not read the calendar." });
@@ -126,11 +177,9 @@ async function startServer() {
     "Content Studio",
     "Corporate Event Space",
   ]);
-  const ALLOWED_TIMES = new Set([
-    "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM",
-    "12:00 PM", "1:00 PM", "2:00 PM", "3:00 PM",
-    "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM",
-  ]);
+  // Derived from the shared office hours, not hand-listed — a hand-listed copy
+  // silently rejects every slot the moment the hours change.
+  const ALLOWED_TIMES = new Set(START_TIMES);
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
   // Light per-IP throttle: the calendar write is the only unauthenticated
@@ -168,17 +217,20 @@ async function startServer() {
     if (!ALLOWED_TIMES.has(String(startTime))) {
       return res.status(400).json({ error: "Unknown start time." });
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
-      return res.status(400).json({ error: "date must be YYYY-MM-DD" });
-    }
     const nHours = Number(hours);
-    if (!Number.isInteger(nHours) || nHours < 1 || nHours > 12) {
-      return res.status(400).json({ error: "Duration must be between 1 and 12 hours." });
+    if (!Number.isInteger(nHours) || nHours < 1 || nHours > MAX_HOURS) {
+      return res.status(400).json({ error: `Duration must be between 1 and ${MAX_HOURS} hours.` });
     }
+    // Office hours are enforced here, not just in the form — the form only
+    // decides what to *offer*. Covers the weekday rule, the 9:30–4:30 window,
+    // and the date format.
+    const outOfHours = validateBookingWindow(String(date), String(startTime), nHours);
+    if (outOfHours) return res.status(400).json({ error: outOfHours });
+
     const run = bookingChain.then(async () => {
     try {
-      const { hour, minute } = parseTime(String(startTime));
-      const startInstant = wallToInstant(String(date), hour, minute, TIME_ZONE);
+      const startMinutes = parseTimeToMinutes(String(startTime));
+      const startInstant = wallToInstant(String(date), Math.floor(startMinutes / 60), startMinutes % 60, TIME_ZONE);
       if (startInstant.getTime() < Date.now() - 60_000) {
         return res.status(400).json({ error: "That date has already passed." });
       }

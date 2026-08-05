@@ -10,6 +10,7 @@ import {
   Check, ChevronLeft, ChevronRight, ChevronDown,
   Lock, Tag, ArrowRight, User, Calendar
 } from "lucide-react";
+import { START_TIMES, DEFAULT_START_TIME, MAX_HOURS, isOpenDay } from "@shared/booking";
 
 type SpaceOption = {
   id: string;
@@ -29,11 +30,8 @@ const spaceOptions: SpaceOption[] = [
   { id: "corporate-event",name: "Corporate Event Space",   memberPrice: 75,  nonMemberPrice: 150, unit: "/hr", minHours: 2 },
 ];
 
-const timeSlots = [
-  "8:00 AM","9:00 AM","10:00 AM","11:00 AM",
-  "12:00 PM","1:00 PM","2:00 PM","3:00 PM",
-  "4:00 PM","5:00 PM","6:00 PM","7:00 PM",
-];
+// Office hours live in @shared/booking so this and the /booking page can't drift.
+const timeSlots = START_TIMES;
 
 const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const MONTHS = [
@@ -58,7 +56,7 @@ export default function SpaceReservation() {
   const [calYear, setCalYear]             = useState(today.getFullYear());
   const [calMonth, setCalMonth]           = useState(today.getMonth());
   const [selectedDay, setSelectedDay]     = useState<number | null>(null);
-  const [startTime, setStartTime]         = useState("9:00 AM");
+  const [startTime, setStartTime]         = useState(DEFAULT_START_TIME);
   const [name, setName]                   = useState("");
   const [email, setEmail]                 = useState("");
   const [phone, setPhone]                 = useState("");
@@ -74,7 +72,7 @@ export default function SpaceReservation() {
     const cell = new Date(calYear, calMonth, d);
     cell.setHours(0, 0, 0, 0);
     const t = new Date(); t.setHours(0, 0, 0, 0);
-    return cell < t;
+    return cell < t || !isOpenDay(cell.getDay());
   };
 
   const prevMonth = () => {
@@ -368,7 +366,7 @@ export default function SpaceReservation() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => setHours(Math.min(12, hours + 1))}
+                        onClick={() => setHours(Math.min(MAX_HOURS, hours + 1))}
                         className="w-14 h-14 flex items-center justify-center text-black/50 hover:text-black hover:bg-black/5 transition-colors text-xl"
                       >
                         +

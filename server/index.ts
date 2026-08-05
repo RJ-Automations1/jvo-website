@@ -112,18 +112,74 @@ async function startServer() {
     }
   });
 
+  // The spaces and start times the site actually offers — the API accepts
+  // nothing outside these lists, so a scripted POST can't write arbitrary
+  // text or absurd time ranges onto the staff calendar.
+  const ALLOWED_SPACES = new Set([
+    "Classroom (seats 15)",
+    "Conference Room (seats 6)",
+    "Private Office — Small",
+    "Private Office — Large",
+    "Content Studio",
+    "Corporate Event Space",
+  ]);
+  const ALLOWED_TIMES = new Set([
+    "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM",
+    "12:00 PM", "1:00 PM", "2:00 PM", "3:00 PM",
+    "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM",
+  ]);
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  // Light per-IP throttle: the calendar write is the only unauthenticated
+  // mutation on the site, so cap it hard.
+  const bookHits = new Map<string, number[]>();
+  function throttled(ip: string): boolean {
+    const now = Date.now();
+    const hits = (bookHits.get(ip) || []).filter((t) => now - t < 60_000);
+    hits.push(now);
+    bookHits.set(ip, hits);
+    return hits.length > 5;
+  }
+
+  // Serialize bookings so two simultaneous submits can't both pass the
+  // freeBusy check and double-book the same slot (single instance, so an
+  // in-process queue is sufficient).
+  let bookingChain: Promise<unknown> = Promise.resolve();
+
   // Create a booking (conflict-checked)
   app.post("/api/book", async (req, res) => {
     const client = getClient();
     if (!client) return res.status(503).json({ error: "Booking is not configured on the server yet." });
+    const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "?").split(",")[0].trim();
+    if (throttled(ip)) return res.status(429).json({ error: "Too many booking attempts. Please wait a minute and try again." });
     const { name, email, phone, space, date, startTime, hours, notes } = req.body || {};
     if (!name || !email || !space || !date || !startTime || !hours) {
       return res.status(400).json({ error: "Missing required booking fields." });
     }
+    if (String(name).length > 120 || !EMAIL_RE.test(String(email))) {
+      return res.status(400).json({ error: "Please provide a valid name and email." });
+    }
+    if (!ALLOWED_SPACES.has(String(space))) {
+      return res.status(400).json({ error: "Unknown space." });
+    }
+    if (!ALLOWED_TIMES.has(String(startTime))) {
+      return res.status(400).json({ error: "Unknown start time." });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) {
+      return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+    }
+    const nHours = Number(hours);
+    if (!Number.isInteger(nHours) || nHours < 1 || nHours > 12) {
+      return res.status(400).json({ error: "Duration must be between 1 and 12 hours." });
+    }
+    const run = bookingChain.then(async () => {
     try {
       const { hour, minute } = parseTime(String(startTime));
       const startInstant = wallToInstant(String(date), hour, minute, TIME_ZONE);
-      const endInstant = new Date(startInstant.getTime() + Number(hours) * 3600 * 1000);
+      if (startInstant.getTime() < Date.now() - 60_000) {
+        return res.status(400).json({ error: "That date has already passed." });
+      }
+      const endInstant = new Date(startInstant.getTime() + nHours * 3600 * 1000);
 
       // Re-check for conflicts right before writing.
       const busy = await freeBusy(client, startInstant.toISOString(), endInstant.toISOString());
@@ -154,6 +210,9 @@ async function startServer() {
       console.error("book error", e?.message);
       res.status(502).json({ error: "Could not create the booking. Please try again or call us." });
     }
+    });
+    bookingChain = run.catch(() => undefined);
+    await run;
   });
 
   // Static frontend (built by Vite to dist/public).

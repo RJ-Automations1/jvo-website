@@ -154,10 +154,12 @@ export default function BookingPage() {
         ? await res.json().catch(() => ({}) as { error?: string })
         : ({} as { error?: string });
       if (!res.ok || !isJson) {
-        // 409 = slot taken; other errors (incl. API not yet live) fall back to a call-us message.
+        // 409 = slot taken (show the server's message); 5xx/misconfig = the
+        // server's internal wording isn't for customers — show call-us instead.
         setBookError(
-          data.error ||
-            "Online booking is being set up. Please call (678) 519-4723 to reserve your space."
+          res.status < 500 && data.error
+            ? data.error
+            : "Online booking is being set up. Please call (678) 519-4723 to reserve your space."
         );
         return;
       }
@@ -186,8 +188,9 @@ export default function BookingPage() {
               <p className="font-sans text-sm text-black/55 leading-relaxed mb-8">
                 Thank you, <strong>{name}</strong>. Your reservation for the{" "}
                 <strong>{selectedSpace.name}</strong> on <strong>{selectedDateStr}</strong> at{" "}
-                <strong>{startTime}</strong> is booked and on our calendar. A confirmation is on its way to{" "}
-                <strong>{email}</strong>.
+                <strong>{startTime}</strong> is booked and on our calendar. If anything about your
+                reservation needs to change, we&apos;ll reach out at <strong>{email}</strong> or give
+                us a call at (678) 519-4723.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <button

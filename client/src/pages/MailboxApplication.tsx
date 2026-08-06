@@ -503,7 +503,10 @@ export default function MailboxApplication() {
               {s.hasAuthorized && (
                 <SummaryRow label="Authorized" value={[s.authFirst, s.authLast].filter(Boolean).join(" ")} onEdit={() => setStepIdx(steps.indexOf("authorized"))} />
               )}
-              <SummaryRow label="Delivery address (JVO)" value={`${CMRA.street}, ${CMRA.city}, ${CMRA.state} ${CMRA.zip}`} />
+              <SummaryRow
+                label="Delivery address (JVO)"
+                value={`${CMRA.streetDisplay}, ${CMRA.city}, ${CMRA.state} ${CMRA.zip} — suite # assigned at setup`}
+              />
             </div>
 
             {!generated ? (
@@ -533,7 +536,8 @@ export default function MailboxApplication() {
                   <div className="flex items-start gap-3 mt-5 pt-5 border-t border-white/10">
                     <MapPin size={15} className="text-white/50 flex-shrink-0 mt-0.5" />
                     <p className="font-sans text-sm text-white/45 leading-relaxed">
-                      <span className="text-white/70 font-medium">{CMRA.street}, {CMRA.city}, {CMRA.state} {CMRA.zip}</span>
+                      <span className="text-white/70 font-medium">{CMRA.streetDisplay}, {CMRA.city}, {CMRA.state} {CMRA.zip}</span>
+                      <br />Line 2a has a blank for the suite number — staff will give you yours to write in.
                       <br />JVO staff will witness your signature and file the form with USPS.
                     </p>
                   </div>

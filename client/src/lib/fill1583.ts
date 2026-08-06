@@ -17,9 +17,19 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf
 const PAGE_H = 792;
 const BLANK_PDF_URL = "/forms/ps1583.pdf";
 
-// JVO is the CMRA (agent). These are prefilled into Section 2 for the customer.
+/*
+ * JVO is the CMRA (agent). These are prefilled into Section 2 for the customer.
+ *
+ * The suite is left as a blank rule on purpose. A member's suite/PMB isn't
+ * assigned until staff set the mailbox up, so printing a number here would put
+ * the wrong one on a USPS form the applicant then signs. They hand-write it at
+ * the counter instead.
+ */
 export const CMRA = {
-  street: "127 Jonesboro Rd, Suite 100",
+  /** Goes on the PDF — the rule is there to be written on. */
+  street: "127 Jonesboro Rd, Suite ________",
+  /** For on-screen use, where a row of underscores just looks broken. */
+  streetDisplay: "127 Jonesboro Rd",
   city: "Jonesboro",
   state: "GA",
   zip: "30236",

@@ -7,6 +7,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Calendar, Clock, Phone, Mail, MapPin, ArrowRight } from "lucide-react";
 import { Link } from "wouter";
+import { DAYS_LABEL, HOURS_LABEL } from "@shared/booking";
 
 const BOOKING_PATH = "/booking";
 
@@ -143,7 +144,11 @@ export default function BookingSection() {
                   <div>
                     <p className="section-label mb-0.5">Member Access</p>
                     <p className="font-sans text-black text-sm">24/7 — Always Open</p>
-                    <p className="font-sans text-black/40 text-xs mt-0.5">Receptionist: Mon–Fri, business hours</p>
+                    {/* Spelled out from the booking rules so the hours quoted here
+                        can't drift from the hours the booking form actually offers. */}
+                    <p className="font-sans text-black/40 text-xs mt-0.5">
+                      Receptionist: {DAYS_LABEL}, {HOURS_LABEL}
+                    </p>
                   </div>
                 </div>
               </div>

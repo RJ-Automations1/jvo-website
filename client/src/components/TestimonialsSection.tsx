@@ -5,6 +5,7 @@
 
 import { useRef, useEffect, useState } from "react";
 import { Star, Quote } from "lucide-react";
+import { businessAgeParts } from "@/lib/businessAge";
 
 const testimonials = [
   {
@@ -27,16 +28,25 @@ const testimonials = [
   },
 ];
 
-const trustStats = [
-  { value: "200+", label: "Active Members" },
-  { value: "4.9★", label: "Google Rating" },
-  { value: "5 yrs", label: "In Business" },
-  { value: "24/7", label: "Access" },
-];
-
 export default function TestimonialsSection() {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
+
+  // Counted live from opening day rather than hardcoded, so it never goes stale.
+  const [age, setAge] = useState(businessAgeParts);
+  useEffect(() => {
+    // Hourly re-check: a tab left open overnight rolls over on its own, and an
+    // hourly tick can't drift past a midnight the way a 24h timer would.
+    const id = setInterval(() => setAge(businessAgeParts()), 60 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const trustStats: { value: string; label: string; sub?: string | null }[] = [
+    { value: "200+", label: "Active Members" },
+    { value: "4.9★", label: "Google Rating" },
+    { value: age.years, sub: age.days, label: "In Business" },
+    { value: "24/7", label: "Access" },
+  ];
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -61,7 +71,16 @@ export default function TestimonialsSection() {
         >
           {trustStats.map((stat, i) => (
             <div key={i} className="bg-white px-6 py-6 text-center hover:bg-[#F7F7F7] transition-colors duration-200">
-              <div className="font-mono-price text-black text-3xl font-medium mb-1">{stat.value}</div>
+              <div className="font-mono-price text-black text-3xl font-medium mb-1">
+                {stat.value}
+                {stat.sub && (
+                  // Smaller and on its own line below md, so the tile never
+                  // overflows in the 2-column mobile grid.
+                  <span className="block md:inline md:ml-2 text-base font-normal text-black/45">
+                    {stat.sub}
+                  </span>
+                )}
+              </div>
               <div className="font-sans text-black/40 text-[10px] uppercase tracking-[0.2em]">{stat.label}</div>
             </div>
           ))}

@@ -26,14 +26,16 @@ const services = [
     title: "Private Offices",
     description:
       "Reserve a private office whenever you need focused work time. Available in small and large configurations, bookable by the hour with 24/7 access.",
-    highlight: "From $20/hr",
+    // Lowest real rate: member, small office. See /pricing for the full
+    // member/non-member table — these "From" figures are the member column.
+    highlight: "From $10/hr",
   },
   {
     icon: Users,
     title: "Conference Rooms",
     description:
       "Host client meetings, team collaborations, or presentations in our fully-equipped conference room. Seats up to 6 with display screen and high-speed WiFi.",
-    highlight: "From $40/hr",
+    highlight: "From $20/hr",
   },
   {
     icon: Mic,

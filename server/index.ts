@@ -5,7 +5,7 @@
  *     GET  /api/availability?date=YYYY-MM-DD  -> busy blocks for that day
  *     POST /api/book                          -> conflict-check + create event
  * - Mailbox application intake (see mailboxApplication.ts):
- *     POST /api/mailbox-application           -> Dropbox filing + master sheet + team email
+ *     POST /api/mailbox-application           -> file the filled 1583 to Dropbox + notify staff
  *
  * The service-account key lives ONLY on the server (env var GOOGLE_SERVICE_ACCOUNT_JSON),
  * never in the frontend bundle. Calendar is shared with the service account, so it can
@@ -16,19 +16,23 @@ import { createServer } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 import { JWT } from "google-auth-library";
-import { mountMailboxApplication } from "./mailboxApplication.js";
-import { getScopedClient } from "./googleAuth.js";
 import { memberAdminRouter } from "./memberAdmin.js";
 import { onboardRouter } from "./memberPortal.js";
 import { initMemberScheduler } from "./memberScheduler.js";
+import { mountMailboxApplication } from "./mailboxApplication.js";
+import { getScopedClient } from "./googleAuth.js";
 import {
   JVO_OFFICE_CALENDAR_ID,
   TIME_ZONE as DEFAULT_TIME_ZONE,
   OPEN_MINUTES,
   CLOSE_MINUTES,
   MAX_HOURS,
+  SLOT_STEP_MINUTES,
   START_TIMES,
+  findSpace,
+  hoursToMinutes,
   isOpenDay,
+  isTour,
   dayOfWeekFor,
   parseTimeToMinutes,
   validateBookingWindow,
@@ -83,29 +87,93 @@ function instantToDayMinutes(instant: Date, dateStr: string): number {
   return Math.max(0, Math.min(24 * 60, mins));
 }
 
-type FreeBusyCalendar = {
-  busy?: { start: string; end: string }[];
-  errors?: { domain: string; reason: string }[];
+/*
+ * ── Per-space busy lookup ────────────────────────────────────────────────────
+ * We deliberately read events rather than freeBusy. freeBusy only answers "is
+ * the calendar busy", which would make a Classroom booking black out the
+ * Conference Room and every other space. Events carry the space id we stamped
+ * on them, so each space can be checked on its own.
+ *
+ * The rule for what blocks what:
+ *   - an event tagged with a space id  -> blocks only that space
+ *   - anything else on the calendar    -> blocks the whole building
+ *
+ * That second case is the important one. Staff entries, holidays and real
+ * events booked over the phone have no tag, so they close every space for
+ * their duration — an all-day entry takes out the whole day, which is what we
+ * want. Untagged means "assume the worst", never "assume it's free".
+ */
+const SPACE_PROP = "jvoSpace";
+
+type CalEvent = {
+  id?: string;
+  status?: string;
+  transparency?: string;
+  summary?: string;
+  start?: { dateTime?: string; date?: string };
+  end?: { dateTime?: string; date?: string };
+  extendedProperties?: { private?: Record<string, string> };
 };
 
-async function freeBusy(client: JWT, timeMin: string, timeMax: string) {
-  const res = await client.request<{ calendars: Record<string, FreeBusyCalendar> }>({
-    url: `${CAL_BASE}/freeBusy`,
-    method: "POST",
-    data: { timeMin, timeMax, timeZone: TIME_ZONE, items: [{ id: CALENDAR_ID }] },
+/*
+ * A calendar the service account can't see returns 404 here, which throws — the
+ * caller turns that into a 502. Never soften this into an empty list: "we
+ * couldn't read the calendar" would then read as "the whole day is free" and we
+ * would double-book every slot.
+ */
+async function listEvents(client: JWT, timeMin: string, timeMax: string): Promise<CalEvent[]> {
+  const params = new URLSearchParams({
+    timeMin,
+    timeMax,
+    timeZone: TIME_ZONE,
+    singleEvents: "true", // expand recurring events into their occurrences
+    orderBy: "startTime",
+    maxResults: "2500",
   });
-  const cal = res.data.calendars[CALENDAR_ID];
-  /*
-   * A calendar the service account can't see comes back 200 with an `errors`
-   * array (reason "notFound") and NO busy list. Falling through to [] would
-   * read as "the whole day is free" and let us double-book every slot, so a
-   * per-calendar error has to be as loud as a failed request.
-   */
-  if (!cal || cal.errors?.length) {
-    const why = cal?.errors?.map((e) => e.reason).join(", ") || "no response for calendar";
-    throw new Error(`freeBusy failed for ${CALENDAR_ID}: ${why}`);
+  const res = await client.request<{ items?: CalEvent[] }>({
+    url: `${CAL_BASE}/calendars/${encodeURIComponent(CALENDAR_ID)}/events?${params}`,
+    method: "GET",
+  });
+  return (res.data.items ?? []).filter(
+    // "Free"-marked entries are notes to staff, not room usage.
+    (e) => e.status !== "cancelled" && e.transparency !== "transparent",
+  );
+}
+
+/** The instants an event occupies, all-day entries included. */
+function eventRange(e: CalEvent): { start: Date; end: Date } | null {
+  if (e.start?.dateTime && e.end?.dateTime) {
+    return { start: new Date(e.start.dateTime), end: new Date(e.end.dateTime) };
   }
-  return cal.busy ?? [];
+  // All-day: date-only, end exclusive. Read as office-local midnights.
+  if (e.start?.date && e.end?.date) {
+    return {
+      start: wallToInstant(e.start.date, 0, 0, TIME_ZONE),
+      end: wallToInstant(e.end.date, 0, 0, TIME_ZONE),
+    };
+  }
+  return null;
+}
+
+/** Whether `e` takes `spaceId` out of service. A null spaceId means "any space". */
+function blocksSpace(e: CalEvent, spaceId: string | null): boolean {
+  const tag = e.extendedProperties?.private?.[SPACE_PROP];
+  if (!tag) return true; // untagged — treat as the whole building
+  return spaceId === null || tag === spaceId;
+}
+
+/** Busy intervals for one space on a given window. */
+async function busyForSpace(
+  client: JWT,
+  timeMin: string,
+  timeMax: string,
+  spaceId: string | null,
+): Promise<{ start: Date; end: Date }[]> {
+  const events = await listEvents(client, timeMin, timeMax);
+  return events
+    .filter((e) => blocksSpace(e, spaceId))
+    .map(eventRange)
+    .filter((r): r is { start: Date; end: Date } => r !== null);
 }
 
 /* ── Server ──────────────────────────────────────────────────────────── */
@@ -113,9 +181,12 @@ async function startServer() {
   const app = express();
   const server = createServer(app);
 
-  // Mounted BEFORE the global JSON parser: the 1583 plus the applicant's ID images
-  // exceed express's default 100kb body limit, so this route brings its own parser.
+  // Mounted BEFORE the global JSON parser: a filled 1583 exceeds express's default
+  // 100kb body limit, so this route brings its own parser with a bigger cap.
   mountMailboxApplication(app);
+
+  // Visitor chatbot. Brings its own body parser (see chat.ts) so it doesn't
+  // depend on being mounted after the global one.
 
   app.use(express.json());
 
@@ -125,25 +196,35 @@ async function startServer() {
     if (!client) return res.status(503).json({ error: "Booking is not configured on the server yet." });
     const date = String(req.query.date || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+
+    /*
+     * Availability is per space. Callers that don't name one get the
+     * conservative answer — everything on the calendar counts as busy — so a
+     * missing param can never invent free time that isn't there.
+     */
+    const spaceParam = String(req.query.space || "");
+    const space = spaceParam ? findSpace(spaceParam) : undefined;
+    if (spaceParam && !space) return res.status(400).json({ error: "Unknown space." });
+
     try {
       const open = isOpenDay(dayOfWeekFor(date));
       if (!open) {
-        return res.json({ date, timeZone: TIME_ZONE, open: false, openMinutes: OPEN_MINUTES, closeMinutes: CLOSE_MINUTES, busy: [], busyMinutes: [] });
+        return res.json({ date, space: space?.id ?? null, timeZone: TIME_ZONE, open: false, openMinutes: OPEN_MINUTES, closeMinutes: CLOSE_MINUTES, busyMinutes: [] });
       }
       const start = wallToInstant(date, 0, 0, TIME_ZONE);
       const end = wallToInstant(date, 24, 0, TIME_ZONE);
-      const busy = await freeBusy(client, start.toISOString(), end.toISOString());
+      const busy = await busyForSpace(client, start.toISOString(), end.toISOString(), space?.id ?? null);
       const busyMinutes = busy.map((b) => ({
-        start: instantToDayMinutes(new Date(b.start), date),
-        end: instantToDayMinutes(new Date(b.end), date),
+        start: instantToDayMinutes(b.start, date),
+        end: instantToDayMinutes(b.end, date),
       }));
       res.json({
         date,
+        space: space?.id ?? null,
         timeZone: TIME_ZONE,
         open: true,
         openMinutes: OPEN_MINUTES,
         closeMinutes: CLOSE_MINUTES,
-        busy,
         busyMinutes,
       });
     } catch (e: any) {
@@ -152,19 +233,11 @@ async function startServer() {
     }
   });
 
-  // The spaces and start times the site actually offers — the API accepts
-  // nothing outside these lists, so a scripted POST can't write arbitrary
-  // text or absurd time ranges onto the staff calendar.
-  const ALLOWED_SPACES = new Set([
-    "Classroom (seats 15)",
-    "Conference Room (seats 6)",
-    "Private Office — Small",
-    "Private Office — Large",
-    "Content Studio",
-    "Corporate Event Space",
-  ]);
-  // Derived from the shared office hours, not hand-listed — a hand-listed copy
-  // silently rejects every slot the moment the hours change.
+  // The start times the site actually offers — the API accepts nothing outside
+  // this list, so a scripted POST can't write absurd time ranges onto the staff
+  // calendar. Derived from the shared office hours, not hand-listed: a
+  // hand-listed copy silently rejects every slot the moment the hours change.
+  // (Spaces are validated the same way, via findSpace.)
   const ALLOWED_TIMES = new Set(START_TIMES);
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -197,20 +270,21 @@ async function startServer() {
     if (String(name).length > 120 || !EMAIL_RE.test(String(email))) {
       return res.status(400).json({ error: "Please provide a valid name and email." });
     }
-    if (!ALLOWED_SPACES.has(String(space))) {
+    const booked = findSpace(String(space));
+    if (!booked) {
       return res.status(400).json({ error: "Unknown space." });
     }
     if (!ALLOWED_TIMES.has(String(startTime))) {
       return res.status(400).json({ error: "Unknown start time." });
     }
     const nHours = Number(hours);
-    if (!Number.isInteger(nHours) || nHours < 1 || nHours > MAX_HOURS) {
-      return res.status(400).json({ error: `Duration must be between 1 and ${MAX_HOURS} hours.` });
+    if (!Number.isFinite(nHours) || nHours <= 0 || nHours > MAX_HOURS || hoursToMinutes(nHours) % SLOT_STEP_MINUTES !== 0) {
+      return res.status(400).json({ error: `Duration must be in 30-minute blocks, up to ${MAX_HOURS} hours.` });
     }
     // Office hours are enforced here, not just in the form — the form only
-    // decides what to *offer*. Covers the weekday rule, the 9:30–4:30 window,
-    // and the date format.
-    const outOfHours = validateBookingWindow(String(date), String(startTime), nHours);
+    // decides what to *offer*. Covers the weekday rule, this space's own start
+    // and end limits, and the date format.
+    const outOfHours = validateBookingWindow(booked, String(date), String(startTime), nHours);
     if (outOfHours) return res.status(400).json({ error: outOfHours });
 
     const run = bookingChain.then(async () => {
@@ -220,26 +294,35 @@ async function startServer() {
       if (startInstant.getTime() < Date.now() - 60_000) {
         return res.status(400).json({ error: "That date has already passed." });
       }
-      const endInstant = new Date(startInstant.getTime() + nHours * 3600 * 1000);
+      const endInstant = new Date(startInstant.getTime() + hoursToMinutes(nHours) * 60_000);
 
-      // Re-check for conflicts right before writing.
-      const busy = await freeBusy(client, startInstant.toISOString(), endInstant.toISOString());
-      const overlaps = busy.some(
-        (b) => new Date(b.start) < endInstant && new Date(b.end) > startInstant
+      // Re-check for conflicts right before writing — only against what
+      // actually occupies THIS space (plus anything untagged, which occupies
+      // everything). Another space being busy is not our problem.
+      const busy = await busyForSpace(
+        client, startInstant.toISOString(), endInstant.toISOString(), booked.id,
       );
+      const overlaps = busy.some((b) => b.start < endInstant && b.end > startInstant);
       if (overlaps) {
         return res.status(409).json({ error: "That time was just booked. Please pick another slot." });
       }
 
       const event = {
-        summary: `${space} — ${name}`,
+        summary: isTour(booked) ? `Tour — ${name}` : `${booked.name} — ${name}`,
         description:
           `Booked via jonesborovirtualoffice.com\n` +
           `Name: ${name}\nEmail: ${email}\nPhone: ${phone || "—"}\n` +
-          `Space: ${space}\nDuration: ${hours} hour(s)\n` +
+          `${isTour(booked) ? "Type: Tour" : `Space: ${booked.name}`}\n` +
+          `Duration: ${hoursToMinutes(nHours)} minutes\n` +
           (notes ? `Notes: ${notes}\n` : ""),
         start: { dateTime: startInstant.toISOString(), timeZone: TIME_ZONE },
         end: { dateTime: endInstant.toISOString(), timeZone: TIME_ZONE },
+        /*
+         * The tag that makes per-space availability work. Without it this
+         * booking would read as "the whole building is taken" to every later
+         * availability check.
+         */
+        extendedProperties: { private: { [SPACE_PROP]: booked.id } },
       };
       const created = await client.request<{ id: string; htmlLink: string }>({
         url: `${CAL_BASE}/calendars/${encodeURIComponent(CALENDAR_ID)}/events`,

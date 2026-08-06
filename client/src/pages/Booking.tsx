@@ -246,8 +246,8 @@ export default function BookingPage() {
                 Thank you, <strong>{name}</strong>. Your{" "}
                 {tour ? <>30-minute tour</> : <>reservation for the <strong>{selectedSpace.name}</strong></>}{" "}
                 on <strong>{selectedDateStr}</strong> at <strong>{startTime}</strong> is booked and on
-                our calendar. If anything needs to change, we&apos;ll reach out at{" "}
-                <strong>{email}</strong> or give us a call at (678) 519-4723.
+                our calendar. A confirmation is on its way to <strong>{email}</strong> — if it
+                doesn&apos;t arrive, check your spam folder or call us at (678) 519-4723.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <button

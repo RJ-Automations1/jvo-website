@@ -157,6 +157,8 @@ accumulates a growing archive of customer government IDs. Worth setting a delibe
 ## Configuration
 
 All values are environment variables — in `.env` locally, in the Render dashboard for production.
+Locally, `pnpm dev:server` reads `.env` directly (Node's `--env-file-if-exists`), so filling in
+the values below and restarting the dev server is all that's needed to test the real flow.
 
 | Variable | What it is |
 |---|---|

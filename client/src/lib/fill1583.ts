@@ -411,9 +411,8 @@ export async function fill1583FromBytes(
   return pdf.save();
 }
 
-/** Convenience: fill, then trigger a browser download. */
-export async function downloadFilled1583(data: Form1583Data, filename = "PS-Form-1583-JVO.pdf") {
-  const bytes = await fill1583(data);
+/** Save already-generated PDF bytes to the visitor's device. */
+export function downloadBytes(bytes: Uint8Array, filename = "PS-Form-1583-JVO.pdf") {
   const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -423,6 +422,13 @@ export async function downloadFilled1583(data: Form1583Data, filename = "PS-Form
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+/** Convenience: fill, then trigger a browser download. */
+export async function downloadFilled1583(data: Form1583Data, filename = "PS-Form-1583-JVO.pdf") {
+  const bytes = await fill1583(data);
+  downloadBytes(bytes, filename);
+  return bytes;
 }
 
 // Human-readable labels reused by the UI.

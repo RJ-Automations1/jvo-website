@@ -4,6 +4,8 @@
  * - Booking API backed by the SAME Google Calendar / service account as JVO Events:
  *     GET  /api/availability?date=YYYY-MM-DD  -> busy blocks for that day
  *     POST /api/book                          -> conflict-check + create event
+ * - Mailbox application intake (see mailboxApplication.ts):
+ *     POST /api/mailbox-application           -> Dropbox filing + master sheet + team email
  *
  * The service-account key lives ONLY on the server (env var GOOGLE_SERVICE_ACCOUNT_JSON),
  * never in the frontend bundle. Calendar is shared with the service account, so it can
@@ -12,9 +14,10 @@
 import express from "express";
 import { createServer } from "http";
 import path from "path";
-import fs from "fs";
 import { fileURLToPath } from "url";
 import { JWT } from "google-auth-library";
+import { mountMailboxApplication } from "./mailboxApplication.js";
+import { getScopedClient } from "./googleAuth.js";
 import { memberAdminRouter } from "./memberAdmin.js";
 import { onboardRouter } from "./memberPortal.js";
 import { initMemberScheduler } from "./memberScheduler.js";
@@ -40,34 +43,13 @@ const CALENDAR_ID = process.env.JVO_CALENDAR_ID || JVO_OFFICE_CALENDAR_ID;
 const TIME_ZONE = process.env.JVO_TIMEZONE || DEFAULT_TIME_ZONE;
 const CAL_BASE = "https://www.googleapis.com/calendar/v3";
 
-/* ── Service-account auth ─────────────────────────────────────────────── */
-function loadServiceAccount(): { client_email: string; private_key: string } | null {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (raw) {
-    try { return JSON.parse(raw); } catch { console.error("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON"); return null; }
-  }
-  const file = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  if (file && fs.existsSync(file)) {
-    try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; }
-  }
-  return null;
-}
-
-let jwtClient: JWT | null = null;
+/* ── Service-account auth (shared with the master sheet — see googleAuth.ts) ── */
 function getClient(): JWT | null {
-  if (jwtClient) return jwtClient;
   if (!CALENDAR_ID) {
     console.error("JVO_CALENDAR_ID is not set — booking is disabled.");
     return null;
   }
-  const sa = loadServiceAccount();
-  if (!sa) return null;
-  jwtClient = new JWT({
-    email: sa.client_email,
-    key: sa.private_key,
-    scopes: ["https://www.googleapis.com/auth/calendar"],
-  });
-  return jwtClient;
+  return getScopedClient(["https://www.googleapis.com/auth/calendar"]);
 }
 
 /* ── Time helpers (DST-correct via Intl) ─────────────────────────────── */
@@ -130,6 +112,10 @@ async function freeBusy(client: JWT, timeMin: string, timeMax: string) {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+
+  // Mounted BEFORE the global JSON parser: the 1583 plus the applicant's ID images
+  // exceed express's default 100kb body limit, so this route brings its own parser.
+  mountMailboxApplication(app);
 
   app.use(express.json());
 

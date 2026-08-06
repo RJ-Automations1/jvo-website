@@ -42,7 +42,33 @@ services:
       - key: MEMBER_EMAILS_ENABLED
         value: "false"
       # Gmail app-password SMTP (same creds as the jvo-events service) — SECRET.
+      # ── Mailbox application filing ────────────────────────────────────────
+      # Dropbox APP credentials (App Console -> scoped access app), NOT an
+      # account password. Scope required: files.content.write.
+      # All three are SECRET — set them in the Render dashboard.
+      - key: DROPBOX_APP_KEY
+        sync: false
+      - key: DROPBOX_APP_SECRET
+        sync: false
+      - key: DROPBOX_REFRESH_TOKEN
+        sync: false
+      # Parent folder that per-client folders are created under.
+      - key: DROPBOX_ROOT
+        value: "/JVO Mailbox Applications"
+      # Gmail SMTP for the staff notification. SMTP_PASS is a Google App Password
+      # (myaccount.google.com/apppasswords), not the account password. SECRET.
       - key: SMTP_USER
         sync: false
       - key: SMTP_PASS
         sync: false
+      # Where the "new member signup" alert lands. Comma-separated for the whole
+      # team, e.g. "office@jvo.com,manager@jvo.com". Defaults to SMTP_USER.
+      - key: NOTIFY_TO
+        sync: false
+      # Client master list. The spreadsheet must be shared as an Editor with the
+      # service account in GOOGLE_SERVICE_ACCOUNT_JSON, or appends 403.
+      # ID is the long string in the sheet URL: /spreadsheets/d/<THIS>/edit
+      - key: JVO_SHEET_ID
+        sync: false
+      - key: JVO_SHEET_TAB
+        value: "Clients"

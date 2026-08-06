@@ -1,8 +1,11 @@
 /*
  * JVO Mailbox Application — /mailbox-application
- * Onboarding questionnaire that pre-fills the applicant's USPS PS Form 1583
- * entirely in the browser (no data leaves the device) and hands them a ready-to-sign
- * PDF plus the ID checklist to bring to their in-office visit.
+ * Onboarding questionnaire that pre-fills the applicant's USPS PS Form 1583 entirely
+ * in the browser and hands them a ready-to-sign PDF plus the ID checklist to bring to
+ * their in-office visit. On generate, the form and the applicant's uploaded ID /
+ * proof-of-address images are sent to JVO (see lib/fileApplication.ts): Dropbox folder,
+ * a row on the client master sheet, and a team email. Uploads are required — see
+ * validate() — but never replace inspecting the original documents in person.
  *
  * USPS requires TWO documents: (1) a government photo ID and (2) proof of the home
  * address on the form. A driver's/state ID may satisfy only ONE of the two.
@@ -20,9 +23,12 @@ const DESKWORKS_SIGNUP_URL = "https://jvo.satellitedeskworks.com/member-sign-up"
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import {
-  downloadFilled1583, PHOTO_ID_LABELS, ADDRESS_ID_LABELS, CMRA,
+  fill1583, downloadBytes, PHOTO_ID_LABELS, ADDRESS_ID_LABELS, CMRA,
   type Form1583Data, type PhotoIdType, type AddressIdType, type ServiceType,
 } from "@/lib/fill1583";
+import { fileApplicationWithJvo, type DocKind } from "@/lib/fileApplication";
+import DocumentUpload from "@/components/DocumentUpload";
+import type { PreparedDoc } from "@/lib/imagePrep";
 
 // ---- Local form state -------------------------------------------------------
 type Addr = { street: string; city: string; state: string; zip: string };
@@ -39,8 +45,11 @@ interface State {
   bizName: string; bizType: string; biz: Addr; bizPlaceReg: string;
   // photo id
   photoIdType: PhotoIdType | ""; photoIdNumber: string; photoIdIssuer: string; photoIdExp: string;
+  // scans of the documents themselves — held in memory only, never persisted
+  photoIdFront: PreparedDoc[]; photoIdBack: PreparedDoc[];
   // address id
   addressIdType: AddressIdType | ""; addressIdSameAsHome: boolean; addressIdAddr: Addr;
+  addressDocs: PreparedDoc[];
   // authorized individual (optional)
   hasAuthorized: boolean;
   authFirst: string; authMiddle: string; authLast: string; authPhone: string; authEmail: string;
@@ -53,7 +62,9 @@ const initialState: State = {
   home: emptyAddr(), courtProtected: false,
   bizName: "", bizType: "", biz: emptyAddr(), bizPlaceReg: "",
   photoIdType: "", photoIdNumber: "", photoIdIssuer: "", photoIdExp: "",
+  photoIdFront: [], photoIdBack: [],
   addressIdType: "", addressIdSameAsHome: true, addressIdAddr: emptyAddr(),
+  addressDocs: [],
   hasAuthorized: false,
   authFirst: "", authMiddle: "", authLast: "", authPhone: "", authEmail: "",
   authHome: emptyAddr(),
@@ -120,6 +131,10 @@ export default function MailboxApplication() {
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [generated, setGenerated] = useState(false);
+  // Filing the copy to JVO runs after the download and never blocks it.
+  const [filing, setFiling] = useState<"idle" | "sending" | "sent" | "failed">("idle");
+  // Kept so a retry can re-send without regenerating the form.
+  const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
 
   const upd = (patch: Partial<State>) => setS((prev) => ({ ...prev, ...patch }));
 
@@ -156,6 +171,8 @@ export default function MailboxApplication() {
         if (!s.photoIdNumber) return "Enter the ID number.";
         if (!s.photoIdIssuer) return "Enter the issuing entity (e.g. Georgia DDS).";
         if (!s.photoIdExp) return "Enter the ID expiration date.";
+        if (!s.photoIdFront.length) return "Upload a photo of the front of your ID.";
+        if (!s.photoIdBack.length) return "Upload a photo of the back of your ID.";
         return null;
       case "addressId":
         if (!s.addressIdType) return "Select the document that proves your address.";
@@ -163,6 +180,7 @@ export default function MailboxApplication() {
           return "A driver's/state ID can only count once. Choose a different document (lease, insurance, voter card, etc.) to prove your address.";
         if (!s.addressIdSameAsHome && !addrFilled(s.addressIdAddr))
           return "Enter the address exactly as it appears on your proof-of-address document.";
+        if (!s.addressDocs.length) return "Upload a photo or PDF of your proof of address.";
         return null;
       case "authorized":
         if (s.hasAuthorized) {
@@ -222,18 +240,67 @@ export default function MailboxApplication() {
     };
   }
 
-  async function handleGenerate() {
+  /** Everything the applicant uploaded, tagged for the Dropbox filename. */
+  const documents: { kind: DocKind; doc: PreparedDoc }[] = [
+    ...s.photoIdFront.map((doc) => ({ kind: "photo-id-front" as DocKind, doc })),
+    ...s.photoIdBack.map((doc) => ({ kind: "photo-id-back" as DocKind, doc })),
+    ...s.addressDocs.map((doc) => ({ kind: "address-proof" as DocKind, doc })),
+  ];
+  const docsComplete = s.photoIdFront.length > 0 && s.photoIdBack.length > 0 && s.addressDocs.length > 0;
+
+  /** Send the form + uploads to JVO. Split out so retry doesn't regenerate the PDF. */
+  async function sendToJvo(bytes: Uint8Array) {
+    setFiling("sending");
+    try {
+      await fileApplicationWithJvo(
+        {
+          serviceType: s.serviceType || "residential",
+          firstName: s.firstName,
+          lastName: s.lastName,
+          businessName: s.serviceType === "business" ? s.bizName : undefined,
+          businessType: s.serviceType === "business" ? s.bizType : undefined,
+          phone: s.phone,
+          email: s.email,
+          homeAddress: `${s.home.street}, ${s.home.city}, ${s.home.state} ${s.home.zip}`,
+          photoIdLabel: s.photoIdType ? PHOTO_ID_LABELS[s.photoIdType] : undefined,
+          addressIdLabel: s.addressIdType ? ADDRESS_ID_LABELS[s.addressIdType] : undefined,
+          courtProtected: s.courtProtected,
+        },
+        bytes,
+        documents,
+        plan
+      );
+      setFiling("sent");
+    } catch (e) {
+      // Not surfaced as a form error — they still have the PDF and the visit works.
+      console.error("Could not file the application with JVO:", e);
+      setFiling("failed");
+    }
+  }
+
+  /**
+   * Generate the PDF and save it to the visitor's device. On the first pass we also
+   * send everything to JVO; the "download again" button skips that so a second click
+   * doesn't file a duplicate.
+   */
+  async function handleGenerate(alsoSend = true) {
     setGenerating(true);
     setError(null);
+    let bytes: Uint8Array;
     try {
       const filename = `PS-Form-1583-${s.lastName || "JVO"}.pdf`;
-      await downloadFilled1583(toFormData(), filename);
+      bytes = await fill1583(toFormData());
+      downloadBytes(bytes, filename);
+      setPdfBytes(bytes);
       setGenerated(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not generate the PDF. Please try again.");
+      return;
     } finally {
       setGenerating(false);
     }
+
+    if (alsoSend) await sendToJvo(bytes);
   }
 
   return (
@@ -258,7 +325,9 @@ export default function MailboxApplication() {
           <p className="font-sans text-sm text-white/45 mt-3 leading-relaxed">
             Every JVO membership includes a mailbox, so we start by preparing your USPS Form 1583 — the
             form that authorizes JVO to receive mail on your behalf. Then you'll finish registration.
-            Everything on this page stays on your device.
+            You'll also upload photos of your ID and proof of address. Everything stays on your device
+            until you generate the form — then it's sent to JVO so we can prep your mailbox before
+            your visit. You still bring the original documents with you.
           </p>
         </div>
 
@@ -402,6 +471,20 @@ export default function MailboxApplication() {
               <Field className="sm:col-span-3" label="Issuing Entity" required value={s.photoIdIssuer} onChange={(v) => upd({ photoIdIssuer: v })} placeholder="e.g. Georgia DDS, U.S. Dept of State" />
               <Field className="sm:col-span-3" label="Expiration Date" required value={s.photoIdExp} onChange={(v) => upd({ photoIdExp: v })} placeholder="MM/DD/YYYY" />
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-8 pt-8 border-t border-white/10">
+              <DocumentUpload
+                label="Front of ID"
+                hint="A clear, flat photo — all four corners visible and nothing cut off."
+                docs={s.photoIdFront}
+                onChange={(d) => upd({ photoIdFront: d })}
+              />
+              <DocumentUpload
+                label="Back of ID"
+                hint="Required even if it looks blank — your address is often printed here."
+                docs={s.photoIdBack}
+                onChange={(d) => upd({ photoIdBack: d })}
+              />
+            </div>
           </StepShell>
         )}
 
@@ -444,6 +527,15 @@ export default function MailboxApplication() {
                 <AddressFields addr={s.addressIdAddr} set={(a) => upd({ addressIdAddr: a })} />
               </div>
             )}
+            <div className="mt-8 pt-8 border-t border-white/10">
+              <DocumentUpload
+                label="Upload your proof of address"
+                hint="Photo or PDF. Add more than one file if the document runs several pages — the address must be readable."
+                docs={s.addressDocs}
+                onChange={(d) => upd({ addressDocs: d })}
+                multiple
+              />
+            </div>
           </StepShell>
         )}
 
@@ -485,8 +577,9 @@ export default function MailboxApplication() {
             <div>
               <h2 className="font-display text-xl font-semibold text-white mb-1">Review &amp; generate</h2>
               <p className="font-sans text-sm text-white/45 leading-relaxed">
-                Check the summary, then download your pre-filled PS Form 1583. Bring the printed form
-                (unsigned) and your two IDs to your in-office visit.
+                Check the summary, then download your pre-filled PS Form 1583. Your form and uploaded
+                documents go to JVO at the same time. Bring the printed form (unsigned) and your two
+                original IDs to your in-office visit.
               </p>
             </div>
 
@@ -500,6 +593,15 @@ export default function MailboxApplication() {
               )}
               <SummaryRow label="Photo ID" value={s.photoIdType ? PHOTO_ID_LABELS[s.photoIdType] : "—"} onEdit={() => setStepIdx(steps.indexOf("photoId"))} />
               <SummaryRow label="Address proof" value={s.addressIdType ? ADDRESS_ID_LABELS[s.addressIdType] : "—"} onEdit={() => setStepIdx(steps.indexOf("addressId"))} />
+              <SummaryRow
+                label="Uploads"
+                value={[
+                  s.photoIdFront.length ? "ID front" : null,
+                  s.photoIdBack.length ? "ID back" : null,
+                  s.addressDocs.length ? `${s.addressDocs.length} address ${s.addressDocs.length === 1 ? "file" : "files"}` : null,
+                ].filter(Boolean).join(" · ") || "None yet"}
+                onEdit={() => setStepIdx(steps.indexOf("photoId"))}
+              />
               {s.hasAuthorized && (
                 <SummaryRow label="Authorized" value={[s.authFirst, s.authLast].filter(Boolean).join(" ")} onEdit={() => setStepIdx(steps.indexOf("authorized"))} />
               )}
@@ -510,9 +612,16 @@ export default function MailboxApplication() {
             </div>
 
             {!generated ? (
-              <button onClick={handleGenerate} disabled={generating} className={btnPrimary}>
-                {generating ? "Generating…" : (<>Download Pre-Filled Form <Download size={14} /></>)}
-              </button>
+              <div>
+                <button onClick={() => handleGenerate()} disabled={generating || !docsComplete} className={btnPrimary}>
+                  {generating ? "Generating…" : (<>Download Pre-Filled Form <Download size={14} /></>)}
+                </button>
+                {!docsComplete && (
+                  <p className="font-sans text-xs text-amber-200/70 mt-3 leading-relaxed">
+                    Add photos of both sides of your ID and your proof of address before generating the form.
+                  </p>
+                )}
+              </div>
             ) : (
               <div className="space-y-6">
                 <div className="flex items-start gap-3 border border-emerald-500/30 bg-emerald-500/10 px-5 py-4">
@@ -522,6 +631,31 @@ export default function MailboxApplication() {
                     <p className="font-sans text-xs text-emerald-200/60 mt-1 leading-relaxed">
                       Don't sign it yet — you'll sign in front of JVO staff at your visit.
                     </p>
+                    {filing === "sending" && (
+                      <p className="font-sans text-xs text-emerald-200/60 mt-2">
+                        Sending your form and documents to JVO…
+                      </p>
+                    )}
+                    {filing === "sent" && (
+                      <p className="font-sans text-xs text-emerald-200/60 mt-2">
+                        JVO has your application and your uploaded documents on file, and will have
+                        everything ready for your visit.
+                      </p>
+                    )}
+                    {filing === "failed" && (
+                      <div className="mt-2">
+                        <p className="font-sans text-xs text-amber-200/70 leading-relaxed">
+                          Your documents didn't reach JVO. Your form downloaded fine — you can retry, or
+                          just bring the printed form and your IDs to your visit.
+                        </p>
+                        <button
+                          onClick={() => pdfBytes && sendToJvo(pdfBytes)}
+                          className="font-sans text-[11px] font-semibold tracking-[0.18em] uppercase text-amber-200/90 hover:text-white transition-colors mt-2"
+                        >
+                          Retry sending
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -563,7 +697,7 @@ export default function MailboxApplication() {
                   </a>
                 </div>
 
-                <button onClick={handleGenerate} className={btnGhost}>
+                <button onClick={() => handleGenerate(false)} className={btnGhost}>
                   <Download size={13} /> Download form again
                 </button>
               </div>

@@ -18,6 +18,7 @@ import { JWT } from "google-auth-library";
 import { memberAdminRouter } from "./memberAdmin.js";
 import { onboardRouter } from "./memberPortal.js";
 import { initMemberScheduler } from "./memberScheduler.js";
+import { mountChat } from "./chat.js";
 import {
   JVO_OFFICE_CALENDAR_ID,
   TIME_ZONE as DEFAULT_TIME_ZONE,
@@ -130,6 +131,10 @@ async function freeBusy(client: JWT, timeMin: string, timeMax: string) {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+
+  // Visitor chatbot. Brings its own body parser (see chat.ts) so it doesn't
+  // depend on being mounted after the global one.
+  mountChat(app);
 
   app.use(express.json());
 

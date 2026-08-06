@@ -46,3 +46,14 @@ services:
         sync: false
       - key: SMTP_PASS
         sync: false
+      # ── Website chatbot (/api/chat) ───────────────────────────────────────
+      # Anthropic API key from https://console.anthropic.com/settings/keys.
+      # SECRET — set in the Render dashboard. Without it the widget still loads
+      # but answers with a friendly "email/call us" fallback instead of erroring.
+      # Default model is claude-opus-5; set CHAT_MODEL=claude-haiku-4-5 for a
+      # cheaper high-volume FAQ bot.
+      #
+      # NOTE: production is the jvo-website-node service, which this blueprint
+      # does NOT manage — setting this here does not set it there.
+      - key: ANTHROPIC_API_KEY
+        sync: false

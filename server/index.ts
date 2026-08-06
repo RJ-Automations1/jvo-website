@@ -20,6 +20,7 @@ import { memberAdminRouter } from "./memberAdmin.js";
 import { onboardRouter } from "./memberPortal.js";
 import { initMemberScheduler } from "./memberScheduler.js";
 import { mountMailboxApplication } from "./mailboxApplication.js";
+import { mountChat } from "./chat.js";
 import { getScopedClient } from "./googleAuth.js";
 import { sendBookingEmails } from "./bookingEmail.js";
 import {
@@ -208,6 +209,7 @@ async function startServer() {
 
   // Visitor chatbot. Brings its own body parser (see chat.ts) so it doesn't
   // depend on being mounted after the global one.
+  mountChat(app);
 
   app.use(express.json());
 

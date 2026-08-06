@@ -72,3 +72,13 @@ services:
         sync: false
       - key: JVO_SHEET_TAB
         value: "Clients"
+      # ── Website chatbot (/api/chat) ───────────────────────────────────────
+      # Anthropic API key from https://console.anthropic.com/settings/keys.
+      # SECRET — set in the Render dashboard. Without it the widget still loads
+      # but answers with a "call or email us" fallback instead of erroring.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Optional: defaults to claude-opus-5. Set CHAT_MODEL=claude-haiku-4-5
+      # for a cheaper, faster FAQ bot if volume grows.
+      - key: CHAT_MODEL
+        sync: false

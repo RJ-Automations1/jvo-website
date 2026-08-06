@@ -31,7 +31,7 @@ const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
 const SMTP_PORT = Number(process.env.SMTP_PORT || "465");
 const MAIL_FROM =
   process.env.MAIL_FROM || (SMTP_USER ? `Jonesboro Virtual Office <${SMTP_USER}>` : "");
-const MAIL_REPLY_TO = process.env.MAIL_REPLY_TO || "jonesborovirtualoffice@gmail.com";
+export const MAIL_REPLY_TO = process.env.MAIL_REPLY_TO || "jonesborovirtualoffice@gmail.com";
 const EMAILS_ENABLED = String(process.env.MEMBER_EMAILS_ENABLED || "false") === "true";
 
 const OFFICE_ADDRESS = "127 Jonesboro Rd, Suite 100, Jonesboro, GA 30236";
@@ -95,7 +95,7 @@ async function deliver(
 
 /* ── Shared layout (office brand) ─────────────────────────────────────── */
 
-function escapeHtml(s: unknown): string {
+export function escapeHtml(s: unknown): string {
   return String(s ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -117,7 +117,7 @@ function button(href: string, label: string): string {
 }
 
 /** Office-brand page shell: near-white, near-black, serif heading. */
-function shell(headingText: string, bodyHtml: string): string {
+export function shell(headingText: string, bodyHtml: string): string {
   return `<!doctype html>
 <html lang="en"><body style="margin:0;padding:0;background:#FAFAFA">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FAFAFA;padding:32px 14px"><tr><td align="center">
@@ -133,7 +133,7 @@ function shell(headingText: string, bodyHtml: string): string {
 </body></html>`;
 }
 
-const TEXT_FOOTER = `\n\n—\nJonesboro Virtual Office\n${OFFICE_ADDRESS}\n${OFFICE_PHONE}\njonesborovirtualoffice@gmail.com`;
+export const TEXT_FOOTER = `\n\n—\nJonesboro Virtual Office\n${OFFICE_ADDRESS}\n${OFFICE_PHONE}\njonesborovirtualoffice@gmail.com`;
 
 function firstName(member: { name?: string | null }): string {
   return ((member.name || "there").trim() || "there").split(/\s+/)[0];
@@ -357,6 +357,38 @@ Questions any time: reply to this email or call ${OFFICE_PHONE}.${TEXT_FOOTER}`;
     </ul>
     <p>Thanks for choosing us. Your business, elevated.</p>`);
   return deliver("membership active", { to: member.email, subject, text, html });
+}
+
+/**
+ * Transactional send — used for booking confirmations.
+ *
+ * Deliberately NOT gated by MEMBER_EMAILS_ENABLED. That flag exists to hold
+ * back the membership pipeline's outbound mail until staff are ready for it;
+ * a booking confirmation is a direct reply to something the customer just did,
+ * so suppressing it would leave them wondering whether the booking took. Still
+ * skips gracefully (never throws) when SMTP is unconfigured.
+ */
+export async function sendTransactional(
+  label: string,
+  mail: { to: string; subject: string; text: string; html: string }
+): Promise<SendResult> {
+  const to = (mail.to || "").trim();
+  if (!to) return { configured: emailConfigured(), sent: false, skipped: "no recipient" };
+  const t = getTransporter();
+  if (!t) {
+    console.warn(`[booking-email] SMTP not configured — skipped ${label} → ${to}`);
+    return { configured: false, sent: false, skipped: "smtp not configured" };
+  }
+  await t.sendMail({
+    from: MAIL_FROM,
+    to,
+    replyTo: MAIL_REPLY_TO,
+    subject: mail.subject,
+    text: mail.text,
+    html: mail.html,
+  });
+  console.log(`[booking-email] sent ${label} → ${to}`);
+  return { configured: true, sent: true };
 }
 
 /** Internal staff notification (new appointment, docs complete, stale member…). */

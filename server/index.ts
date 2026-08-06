@@ -21,6 +21,7 @@ import { onboardRouter } from "./memberPortal.js";
 import { initMemberScheduler } from "./memberScheduler.js";
 import { mountMailboxApplication } from "./mailboxApplication.js";
 import { getScopedClient } from "./googleAuth.js";
+import { sendBookingEmails } from "./bookingEmail.js";
 import {
   JVO_OFFICE_CALENDAR_ID,
   TIME_ZONE as DEFAULT_TIME_ZONE,
@@ -30,6 +31,7 @@ import {
   SLOT_STEP_MINUTES,
   START_TIMES,
   findSpace,
+  formatMinutes,
   hoursToMinutes,
   isOpenDay,
   isTour,
@@ -40,6 +42,25 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/** "2026-08-07" -> "Friday, August 7, 2026", read as a plain calendar date. */
+function longDate(dateStr: string): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return `${WEEKDAYS[dow]}, ${MONTHS[m - 1]} ${d}, ${y}`;
+}
+
+/** 0.5 -> "30 minutes", 1 -> "1 hour", 1.5 -> "1.5 hours". */
+function durationLabel(hours: number): string {
+  if (hours < 1) return `${hoursToMinutes(hours)} minutes`;
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
+}
 
 // The "JVO Office" calendar. No fallback on purpose — if it isn't configured we
 // refuse to book rather than write onto whatever calendar was here before.
@@ -330,6 +351,33 @@ async function startServer() {
         data: event,
       });
       res.json({ ok: true, eventId: created.data.id, htmlLink: created.data.htmlLink });
+
+      /*
+       * Confirmation mail is fired AFTER responding and is never awaited: the
+       * booking is already on the calendar, so a slow or failing SMTP hop must
+       * not delay the customer's confirmation screen or turn a successful
+       * reservation into an error.
+       */
+      void sendBookingEmails({
+        name: String(name),
+        email: String(email),
+        phone: phone ? String(phone) : undefined,
+        spaceName: booked.name,
+        isTour: isTour(booked),
+        dateLabel: longDate(String(date)),
+        startTime: formatMinutes(startMinutes),
+        endTime: formatMinutes(startMinutes + hoursToMinutes(nHours)),
+        durationLabel: durationLabel(nHours),
+        notes: notes ? String(notes) : undefined,
+        htmlLink: created.data.htmlLink,
+      })
+        .then(({ customer, staff }) =>
+          console.log(
+            `booking email: customer=${customer?.sent ? "sent" : customer?.skipped || "failed"} ` +
+            `staff=${staff?.sent ? "sent" : staff?.skipped || "failed"}`,
+          ),
+        )
+        .catch((e) => console.error("booking email failed:", e?.message));
     } catch (e: any) {
       console.error("book error", e?.message);
       res.status(502).json({ error: "Could not create the booking. Please try again or call us." });

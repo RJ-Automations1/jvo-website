@@ -82,16 +82,17 @@ export default function BookingSection() {
             <div className="bg-white border border-black/10 p-6">
               <h3 className="font-sans font-semibold text-black text-base mb-4">Quick Options</h3>
               <div className="space-y-3">
+                {/* Each option lands on /booking with its tile already picked. */}
                 {[
-                  { label: "Schedule a Free Tour", desc: "30-min walkthrough of all spaces", icon: Calendar },
-                  { label: "Private Office", desc: "Book by the hour — from $10/hr (member)", icon: Clock },
-                  { label: "Conference Room", desc: "Reserve for meetings — from $20/hr (member)", icon: MapPin },
+                  { label: "Schedule a Free Tour", desc: "30-min walkthrough of all spaces", icon: Calendar, space: "tour" },
+                  { label: "Private Office", desc: "Book by the hour — from $10/hr (member)", icon: Clock, space: "private-small" },
+                  { label: "Conference Room", desc: "Reserve for meetings — from $20/hr (member)", icon: MapPin, space: "conference" },
                 ].map((opt, i) => {
                   const Icon = opt.icon;
                   return (
                     <Link
                       key={i}
-                      href={BOOKING_PATH}
+                      href={`${BOOKING_PATH}?space=${opt.space}`}
                       className="flex items-center gap-4 border border-black/10 p-4 hover:border-black/30 transition-all duration-200 group"
                     >
                       <div className="w-9 h-9 border border-black/15 flex items-center justify-center flex-shrink-0 group-hover:border-black/40 transition-colors">

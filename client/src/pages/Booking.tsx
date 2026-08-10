@@ -158,6 +158,43 @@ export default function BookingPage() {
     [selectedSpace, hours],
   );
 
+  /*
+   * The price the SERVER will actually charge. The "Member" toggle is only a
+   * browsing aid — the member rate is granted against the members table — so
+   * once we know the customer's email we quote from the server and show that,
+   * rather than letting someone tick "Member" and meet a bigger number on the
+   * Stripe page.
+   */
+  const [quote, setQuote] = useState<{ amount: number; rate: number; member: boolean } | null>(null);
+
+  useEffect(() => {
+    if (tour) { setQuote(null); return; }
+    const addr = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) { setQuote(null); return; }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const r = await fetch(
+          `/api/book/quote?space=${encodeURIComponent(selectedSpace.id)}` +
+          `&hours=${hours}&email=${encodeURIComponent(addr)}`,
+        );
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!cancelled) setQuote(d);
+      } catch {
+        /* keep the local estimate — the checkout call is what actually matters */
+      }
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [email, selectedSpace.id, hours, tour]);
+
+  /** What we show. Server quote wins the moment we have one. */
+  const shownRate  = quote ? quote.rate : pricePerHour;
+  const shownTotal = quote ? quote.amount : subtotal;
+  const shownMember = quote ? quote.member : isMember;
+  /** They ticked "Member" but the email isn't on an active membership. */
+  const memberClaimUnverified = Boolean(quote && isMember && !quote.member);
+
   const isSlotTaken = (slot: string) => {
     const start = parseTimeToMinutes(slot);
     const end = start + hoursToMinutes(hours);
@@ -188,6 +225,41 @@ export default function BookingPage() {
     setBookError("");
     setSubmitting(true);
     try {
+      /*
+       * Anything with a price is pay-first: the server prices it (from its own
+       * member check, never from this form) and hands back a Stripe Checkout
+       * URL. Nothing is written to the calendar until the payment clears, so
+       * we leave this page entirely and come back via /booking/confirmed.
+       *
+       * Free bookings — tours — still go straight through /api/book below.
+       */
+      if (!tour) {
+        const pay = await fetch("/api/book/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name, email, phone, notes,
+            space: selectedSpace.id,
+            date: isoDate,
+            startTime,
+            hours,
+          }),
+        });
+        const payJson = (await pay.json().catch(() => ({}))) as { url?: string; error?: string };
+        if (!pay.ok || !payJson.url) {
+          setBookError(
+            pay.status < 500 && payJson.error
+              ? payJson.error
+              : "Online booking is being set up. Please call (678) 519-4723 to reserve your space.",
+          );
+          if (pay.status === 409) void refreshAvailability();
+          return;
+        }
+        // Hand off to Stripe. Slot is held until we're back or the hold lapses.
+        window.location.href = payJson.url;
+        return;
+      }
+
       const res = await fetch("/api/book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -597,7 +669,7 @@ export default function BookingPage() {
                         { label: "Date",     value: selectedDay ? selectedDateStr : null },
                         { label: "Time",     value: startTime },
                         { label: "Duration", value: durationLabel(hours) },
-                        { label: "Rate",     value: tour ? "Free" : `${money(pricePerHour)}/hr${isMember ? " (member)" : ""}` },
+                        { label: "Rate",     value: tour ? "Free" : `${money(shownRate)}/hr${shownMember ? " (member)" : ""}` },
                       ].map(({ label, value }) => (
                         <div key={label} className="flex justify-between gap-3">
                           <span className="font-sans text-[10px] uppercase tracking-[0.12em] text-white/40">{label}</span>
@@ -608,9 +680,19 @@ export default function BookingPage() {
                       ))}
                       <div className="border-t border-white/10 pt-3 flex justify-between items-baseline">
                         <span className="font-sans text-[10px] uppercase tracking-[0.12em] text-white/40">Total</span>
-                        <span className="font-mono text-2xl font-semibold text-white">{tour ? "Free" : money(subtotal)}</span>
+                        <span className="font-mono text-2xl font-semibold text-white">{tour ? "Free" : money(shownTotal)}</span>
                       </div>
-                      {!isMember && memberSavings > 0 && (
+                      {memberClaimUnverified && (
+                        <div className="bg-white/8 p-3 flex items-start gap-2">
+                          <Lock size={10} className="text-white/40 mt-0.5 flex-shrink-0" />
+                          <p className="font-sans text-[11px] text-white/50 leading-relaxed">
+                            We couldn't match <strong className="text-white">{email.trim()}</strong> to an
+                            active membership, so this is priced at the standard rate. If you are a
+                            member, use the email on your membership — or call us and we'll sort it out.
+                          </p>
+                        </div>
+                      )}
+                      {!shownMember && !memberClaimUnverified && memberSavings > 0 && (
                         <div className="bg-white/8 p-3 flex items-start gap-2">
                           <Lock size={10} className="text-white/40 mt-0.5 flex-shrink-0" />
                           <p className="font-sans text-[11px] text-white/50 leading-relaxed">
@@ -638,11 +720,18 @@ export default function BookingPage() {
                     }`}
                   >
                     {submitting
-                      ? "Booking…"
+                      ? tour ? "Booking…" : "Taking you to checkout…"
                       : selectedDay
-                      ? <><span>{tour ? "Book a Tour" : "Confirm Reservation"}</span><ArrowRight size={13} /></>
+                      ? <><span>{tour ? "Book a Tour" : `Reserve & Pay ${money(shownTotal)}`}</span><ArrowRight size={13} /></>
                       : "Select a Date First"}
                   </button>
+
+                  {!tour && (
+                    <p className="font-sans text-[11px] text-black/45 leading-relaxed text-center">
+                      You'll pay securely through Stripe. Your slot is held while you check out, and
+                      is only confirmed once payment goes through.
+                    </p>
+                  )}
 
                   {!isMember && (
                     <a

@@ -98,6 +98,23 @@ export const SPACES: Space[] = [
   },
 ];
 
+/**
+ * What a booking costs, in whole dollars. Prices are per hour.
+ *
+ * The form shows this and the server charges it — but the server recomputes it
+ * from its OWN verified member check, never from an amount the browser sent.
+ * A price posted by the client is a price the client can edit.
+ */
+export function priceFor(space: Space, hours: number, isMember: boolean): number {
+  const rate = isMember ? space.memberPrice : space.nonMemberPrice;
+  return Math.round(rate * hours);
+}
+
+/** Whether booking this space requires payment (tours are free). */
+export function requiresPayment(space: Space, hours: number, isMember: boolean): boolean {
+  return priceFor(space, hours, isMember) > 0;
+}
+
 /** Accepts an id ("classroom") or the display name, so older clients still book. */
 export function findSpace(idOrName: string): Space | undefined {
   const key = idOrName.trim();

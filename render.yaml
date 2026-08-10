@@ -78,6 +78,26 @@ services:
       # but answers with a "call or email us" fallback instead of erroring.
       - key: ANTHROPIC_API_KEY
         sync: false
+      # ── Stripe (room booking payments) ────────────────────────────────────
+      # Bookings are pay-first: no calendar event exists until Stripe confirms
+      # the charge. Without STRIPE_SECRET_KEY the booking page tells customers
+      # to call instead — it never books a paid space for free.
+      # SECRET — set in the Render dashboard. Use sk_live_… to take real money.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      # Signing secret for the webhook endpoint. Create it at
+      # Dashboard → Developers → Webhooks → add endpoint:
+      #   https://jonesborovirtualoffice.com/api/stripe/webhook
+      # subscribing to checkout.session.completed, .expired,
+      # .async_payment_succeeded and .async_payment_failed.
+      # Without it the webhook rejects every event; bookings then rely on the
+      # slower reconcile-on-return path, so treat this as required.
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      # Absolute origin Stripe returns customers to. Must be the live domain —
+      # a wrong value sends paying customers to a dead success page.
+      - key: PUBLIC_BASE_URL
+        value: "https://jonesborovirtualoffice.com"
       # Optional: defaults to claude-opus-5. Set CHAT_MODEL=claude-haiku-4-5
       # for a cheaper, faster FAQ bot if volume grows.
       - key: CHAT_MODEL

@@ -9,6 +9,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Pricing from "./pages/Pricing";
 import BookingPage from "./pages/Booking";
+import BookingConfirmed from "./pages/BookingConfirmed";
 import MembershipSignup from "./pages/MembershipSignup";
 
 // Lazy — pulls in pdf-lib only when the applicant opens the form.
@@ -20,6 +21,8 @@ function Router() {
       <Route path={"/"} component={Home} />
       <Route path={"/pricing"} component={Pricing} />
       <Route path={"/booking"} component={BookingPage} />
+      {/* Stripe returns the customer here after Checkout. */}
+      <Route path={"/booking/confirmed"} component={BookingConfirmed} />
       <Route path={"/membership-signup"} component={MembershipSignup} />
       <Route path={"/mailbox-application"}>
         <Suspense fallback={<div className="min-h-screen bg-[#0A0A0A]" />}>

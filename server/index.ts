@@ -24,6 +24,13 @@ import { mountChat } from "./chat.js";
 import { getScopedClient } from "./googleAuth.js";
 import { sendBookingEmails } from "./bookingEmail.js";
 import {
+  mountBookingPayments,
+  pendingHolds,
+  isVerifiedMember,
+  paymentsConfigured,
+  type ConfirmedBooking,
+} from "./bookingPayments.js";
+import {
   JVO_OFFICE_CALENDAR_ID,
   TIME_ZONE as DEFAULT_TIME_ZONE,
   OPEN_MINUTES,
@@ -38,6 +45,7 @@ import {
   isTour,
   dayOfWeekFor,
   parseTimeToMinutes,
+  priceFor,
   validateBookingWindow,
 } from "../shared/booking.js";
 
@@ -198,6 +206,94 @@ async function busyForSpace(
     .filter((r): r is { start: Date; end: Date } => r !== null);
 }
 
+/*
+ * Everything that occupies a space: what's on the calendar, plus slots being
+ * paid for right now. A booking mid-checkout has no calendar event yet (we're
+ * pay-first), so without the holds two customers could buy the same slot.
+ */
+async function occupiedForSpace(
+  client: JWT,
+  timeMin: string,
+  timeMax: string,
+  spaceId: string | null,
+): Promise<{ start: Date; end: Date }[]> {
+  const onCalendar = await busyForSpace(client, timeMin, timeMax, spaceId);
+  // A paid hold already has its calendar event, so only the pending ones add
+  // anything the calendar doesn't already know about.
+  const holds = spaceId ? pendingHolds(spaceId, timeMin, timeMax) : [];
+  return [...onCalendar, ...holds];
+}
+
+/**
+ * Write a confirmed booking to the calendar and send the confirmation emails.
+ * Shared by the free path (/api/book, tours) and the paid path (Stripe webhook
+ * / return-page reconcile) so both produce byte-identical events.
+ */
+async function createCalendarBooking(b: ConfirmedBooking): Promise<{ eventId: string; htmlLink: string }> {
+  const client = getClient();
+  if (!client) throw new Error("calendar not configured");
+
+  const tour = isTour(b.space);
+  const startMinutes = parseTimeToMinutes(b.startTime);
+  const paidLine =
+    b.amountCents > 0
+      ? `Paid: $${(b.amountCents / 100).toFixed(2)} via Stripe${b.isMember ? " (member rate)" : ""}\n`
+      : "";
+
+  const event = {
+    summary: tour ? `Tour — ${b.name}` : `${b.space.name} — ${b.name}`,
+    description:
+      `Booked via jonesborovirtualoffice.com\n` +
+      `Name: ${b.name}\nEmail: ${b.email}\nPhone: ${b.phone || "—"}\n` +
+      `${tour ? "Type: Tour" : `Space: ${b.space.name}`}\n` +
+      `Duration: ${hoursToMinutes(b.hours)} minutes\n` +
+      paidLine +
+      (b.notes ? `Notes: ${b.notes}\n` : ""),
+    start: { dateTime: b.startInstant.toISOString(), timeZone: TIME_ZONE },
+    end: { dateTime: b.endInstant.toISOString(), timeZone: TIME_ZONE },
+    /*
+     * The tag that makes per-space availability work. Without it this booking
+     * would read as "the whole building is taken" to every later check.
+     */
+    extendedProperties: { private: { [SPACE_PROP]: b.space.id } },
+  };
+
+  const created = await client.request<{ id: string; htmlLink: string }>({
+    url: `${CAL_BASE}/calendars/${encodeURIComponent(CALENDAR_ID)}/events`,
+    method: "POST",
+    data: event,
+  });
+
+  /*
+   * Confirmation mail is fired AFTER the event exists and is never awaited: the
+   * booking is already real, so a slow or failing SMTP hop must not delay the
+   * customer's confirmation screen or turn a paid reservation into an error.
+   */
+  void sendBookingEmails({
+    name: b.name,
+    email: b.email,
+    phone: b.phone,
+    spaceName: b.space.name,
+    isTour: tour,
+    dateLabel: longDate(b.dateStr),
+    startTime: formatMinutes(startMinutes),
+    endTime: formatMinutes(startMinutes + hoursToMinutes(b.hours)),
+    durationLabel: durationLabel(b.hours),
+    notes: b.notes,
+    htmlLink: created.data.htmlLink,
+    amountPaid: b.amountCents > 0 ? b.amountCents / 100 : undefined,
+  })
+    .then(({ customer, staff }) =>
+      console.log(
+        `booking email: customer=${customer?.sent ? "sent" : customer?.skipped || "failed"} ` +
+        `staff=${staff?.sent ? "sent" : staff?.skipped || "failed"}`,
+      ),
+    )
+    .catch((e) => console.error("booking email failed:", e?.message));
+
+  return { eventId: created.data.id, htmlLink: created.data.htmlLink };
+}
+
 /* ── Server ──────────────────────────────────────────────────────────── */
 async function startServer() {
   const app = express();
@@ -210,6 +306,24 @@ async function startServer() {
   // Visitor chatbot. Brings its own body parser (see chat.ts) so it doesn't
   // depend on being mounted after the global one.
   mountChat(app);
+
+  /*
+   * Stripe. MUST be mounted before express.json(): the webhook verifies a
+   * signature over the raw request bytes, and a body that's been parsed and
+   * re-serialised no longer matches, so every event would be rejected.
+   */
+  mountBookingPayments(app, {
+    createCalendarBooking,
+    hasConflict: async (spaceId, startIso, endIso) => {
+      const client = getClient();
+      if (!client) throw new Error("calendar not configured");
+      const start = new Date(startIso);
+      const end = new Date(endIso);
+      const busy = await occupiedForSpace(client, startIso, endIso, spaceId);
+      return busy.some((b) => b.start < end && b.end > start);
+    },
+    wallToInstant: (dateStr, hour, minute) => wallToInstant(dateStr, hour, minute, TIME_ZONE),
+  });
 
   app.use(express.json());
 
@@ -236,7 +350,7 @@ async function startServer() {
       }
       const start = wallToInstant(date, 0, 0, TIME_ZONE);
       const end = wallToInstant(date, 24, 0, TIME_ZONE);
-      const busy = await busyForSpace(client, start.toISOString(), end.toISOString(), space?.id ?? null);
+      const busy = await occupiedForSpace(client, start.toISOString(), end.toISOString(), space?.id ?? null);
       const busyMinutes = busy.map((b) => ({
         start: instantToDayMinutes(b.start, date),
         end: instantToDayMinutes(b.end, date),
@@ -310,6 +424,20 @@ async function startServer() {
     const outOfHours = validateBookingWindow(booked, String(date), String(startTime), nHours);
     if (outOfHours) return res.status(400).json({ error: outOfHours });
 
+    /*
+     * This route now only books what's FREE — tours. Anything with a price must
+     * go through /api/book/checkout and come back via Stripe, or the room would
+     * be given away for nothing by anyone POSTing here directly. The member rate
+     * is decided by the members table, never by a flag from the browser.
+     */
+    const member = isVerifiedMember(String(email));
+    if (priceFor(booked, nHours, member) > 0) {
+      return res.status(402).json({
+        error: "This space has to be paid for at booking.",
+        paymentRequired: true,
+      });
+    }
+
     const run = bookingChain.then(async () => {
     try {
       const startMinutes = parseTimeToMinutes(String(startTime));
@@ -322,7 +450,7 @@ async function startServer() {
       // Re-check for conflicts right before writing — only against what
       // actually occupies THIS space (plus anything untagged, which occupies
       // everything). Another space being busy is not our problem.
-      const busy = await busyForSpace(
+      const busy = await occupiedForSpace(
         client, startInstant.toISOString(), endInstant.toISOString(), booked.id,
       );
       const overlaps = busy.some((b) => b.start < endInstant && b.end > startInstant);
@@ -330,56 +458,21 @@ async function startServer() {
         return res.status(409).json({ error: "That time was just booked. Please pick another slot." });
       }
 
-      const event = {
-        summary: isTour(booked) ? `Tour — ${name}` : `${booked.name} — ${name}`,
-        description:
-          `Booked via jonesborovirtualoffice.com\n` +
-          `Name: ${name}\nEmail: ${email}\nPhone: ${phone || "—"}\n` +
-          `${isTour(booked) ? "Type: Tour" : `Space: ${booked.name}`}\n` +
-          `Duration: ${hoursToMinutes(nHours)} minutes\n` +
-          (notes ? `Notes: ${notes}\n` : ""),
-        start: { dateTime: startInstant.toISOString(), timeZone: TIME_ZONE },
-        end: { dateTime: endInstant.toISOString(), timeZone: TIME_ZONE },
-        /*
-         * The tag that makes per-space availability work. Without it this
-         * booking would read as "the whole building is taken" to every later
-         * availability check.
-         */
-        extendedProperties: { private: { [SPACE_PROP]: booked.id } },
-      };
-      const created = await client.request<{ id: string; htmlLink: string }>({
-        url: `${CAL_BASE}/calendars/${encodeURIComponent(CALENDAR_ID)}/events`,
-        method: "POST",
-        data: event,
-      });
-      res.json({ ok: true, eventId: created.data.id, htmlLink: created.data.htmlLink });
-
-      /*
-       * Confirmation mail is fired AFTER responding and is never awaited: the
-       * booking is already on the calendar, so a slow or failing SMTP hop must
-       * not delay the customer's confirmation screen or turn a successful
-       * reservation into an error.
-       */
-      void sendBookingEmails({
+      const created = await createCalendarBooking({
         name: String(name),
         email: String(email),
         phone: phone ? String(phone) : undefined,
-        spaceName: booked.name,
-        isTour: isTour(booked),
-        dateLabel: longDate(String(date)),
-        startTime: formatMinutes(startMinutes),
-        endTime: formatMinutes(startMinutes + hoursToMinutes(nHours)),
-        durationLabel: durationLabel(nHours),
         notes: notes ? String(notes) : undefined,
-        htmlLink: created.data.htmlLink,
-      })
-        .then(({ customer, staff }) =>
-          console.log(
-            `booking email: customer=${customer?.sent ? "sent" : customer?.skipped || "failed"} ` +
-            `staff=${staff?.sent ? "sent" : staff?.skipped || "failed"}`,
-          ),
-        )
-        .catch((e) => console.error("booking email failed:", e?.message));
+        space: booked,
+        dateStr: String(date),
+        startTime: String(startTime),
+        hours: nHours,
+        startInstant,
+        endInstant,
+        amountCents: 0, // free — anything priced went through Stripe
+        isMember: member,
+      });
+      res.json({ ok: true, eventId: created.eventId, htmlLink: created.htmlLink });
     } catch (e: any) {
       console.error("book error", e?.message);
       res.status(502).json({ error: "Could not create the booking. Please try again or call us." });

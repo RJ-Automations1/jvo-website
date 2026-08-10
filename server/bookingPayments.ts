@@ -31,6 +31,7 @@ import express from "express";
 import Stripe from "stripe";
 import type { Database } from "better-sqlite3";
 import { getDb, nowIso } from "./db.js";
+import { verifyMember, deskworksLookupConfigured } from "./memberLookup.js";
 import {
   findSpace,
   formatMinutes,
@@ -64,24 +65,11 @@ export function paymentsConfigured(): boolean {
 }
 
 /* ── Member verification ──────────────────────────────────────────────── */
-/**
- * The booking form has a "Member" toggle, but a toggle is not evidence — with
- * money attached it's a discount anyone can click. The member rate is granted
- * only when the email matches an ACTIVE member on file.
+/*
+ * "I am a member" is a claim, not evidence — with money attached it's a
+ * discount anyone could click. The member rate is granted only when the email
+ * checks out against Deskworks or the local members table; see memberLookup.ts.
  */
-export function isVerifiedMember(email: string): boolean {
-  const db = getDb();
-  if (!db || !email) return false;
-  try {
-    const row = db
-      .prepare("SELECT 1 FROM members WHERE lower(email) = lower(?) AND status = 'active' LIMIT 1")
-      .get(String(email).trim());
-    return Boolean(row);
-  } catch {
-    // A lookup failure must never hand out the discount.
-    return false;
-  }
-}
 
 /* ── Holds ────────────────────────────────────────────────────────────── */
 export interface HoldRow {
@@ -322,7 +310,7 @@ export function mountBookingPayments(app: Express, deps: PaymentDeps) {
    * the price on the Stripe page — otherwise someone ticks "Member", sees
    * $30/hr, and gets a $75/hr checkout, which reads as a bait and switch.
    */
-  app.get("/api/book/quote", express.json(), (req: Request, res: Response) => {
+  app.get("/api/book/quote", express.json(), async (req: Request, res: Response) => {
     const space = findSpace(String(req.query.space || ""));
     if (!space) return res.status(400).json({ error: "Unknown space." });
     const hours = Number(req.query.hours);
@@ -330,13 +318,39 @@ export function mountBookingPayments(app: Express, deps: PaymentDeps) {
       return res.status(400).json({ error: "Invalid duration." });
     }
     const email = String(req.query.email || "");
-    const member = EMAIL_RE.test(email) ? isVerifiedMember(email) : false;
+    const member = EMAIL_RE.test(email) ? (await verifyMember(email)).member : false;
     res.json({
       amount: priceFor(space, hours, member),
       rate: member ? space.memberPrice : space.nonMemberPrice,
       member,
       free: priceFor(space, hours, member) <= 0,
     });
+  });
+
+  /* ── "I am a member" ────────────────────────────────────────────────── */
+  /*
+   * Backs the member step on the booking form. Answers only "does this email
+   * get the member rate", never anything about the person behind it — the
+   * response is the same shape whether they're a member or a stranger.
+   */
+  app.get("/api/book/member-check", express.json(), async (req: Request, res: Response) => {
+    const email = String(req.query.email || "").trim();
+    if (!EMAIL_RE.test(email)) {
+      return res.status(400).json({ error: "Please enter a valid email address." });
+    }
+    try {
+      const result = await verifyMember(email);
+      res.json({
+        member: result.member,
+        // Which system recognised them, so staff can tell a Deskworks member
+        // from one onboarded here when someone calls to query their rate.
+        source: result.source,
+        deskworksAvailable: deskworksLookupConfigured(),
+      });
+    } catch (e: any) {
+      console.error("member-check failed:", e?.message);
+      res.status(502).json({ error: "We couldn't check that just now. Please try again." });
+    }
   });
 
   /* ── Start checkout ─────────────────────────────────────────────────── */
@@ -368,7 +382,7 @@ export function mountBookingPayments(app: Express, deps: PaymentDeps) {
 
     // Price is OURS to decide. The client sends no amount, and the member rate
     // is granted only against the members table.
-    const member = isVerifiedMember(String(email));
+    const member = (await verifyMember(String(email))).member;
     const amount = priceFor(booked, nHours, member);
     if (amount <= 0) {
       // Tours and anything else free never touch Stripe.

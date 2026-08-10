@@ -177,6 +177,27 @@ export function maxHoursAt(space: Space, startMinutes: number): number {
   return Math.floor(room / SLOT_STEP_MINUTES) * DURATION_STEP_HOURS;
 }
 
+/**
+ * How long the duration stepper starts at.
+ *
+ * An hour is the booking people actually make. Starting at the 30-minute floor
+ * meant every normal reservation began with a click of work, and quoted a price
+ * for half the time most visitors want.
+ */
+export const DEFAULT_BOOKING_HOURS = 1;
+
+/**
+ * The length a freshly-picked space should start on: an hour, unless the space
+ * says otherwise. A fixed-length space (a tour) always wins, a space with a
+ * longer minimum (the Corporate Event Space, 2 hours) starts at its minimum,
+ * and nothing may start longer than the space can actually take.
+ */
+export function defaultHoursFor(space: Space): number {
+  if (space.fixedHours) return space.fixedHours;
+  const longest = maxHoursAt(space, OPEN_MINUTES);
+  return Math.min(Math.max(DEFAULT_BOOKING_HOURS, space.minHours), longest);
+}
+
 /** The start times a booking of `space` for `hours` can still legally use. */
 export function startTimesFor(space: Space, hours: number): string[] {
   const length = hoursToMinutes(hours);

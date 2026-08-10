@@ -20,6 +20,7 @@ import {
   HOURS_LABEL,
   DURATION_STEP_HOURS,
   OPEN_MINUTES,
+  defaultHoursFor,
   findSpace,
   formatMinutes,
   hoursToMinutes,
@@ -67,7 +68,7 @@ export default function BookingPage() {
   const initialSpace = spaceFromUrl();
   const [isMember,       setIsMember]       = useState(false);
   const [selectedSpace,  setSelectedSpace]  = useState<Space>(initialSpace);
-  const [hours,          setHours]          = useState(initialSpace.fixedHours ?? initialSpace.minHours);
+  const [hours,          setHours]          = useState(defaultHoursFor(initialSpace));
   const [calYear,        setCalYear]        = useState(today.getFullYear());
   const [calMonth,       setCalMonth]       = useState(today.getMonth());
   const [selectedDay,    setSelectedDay]    = useState<number | null>(null);
@@ -166,6 +167,31 @@ export default function BookingPage() {
    * Stripe page.
    */
   const [quote, setQuote] = useState<{ amount: number; rate: number; member: boolean } | null>(null);
+
+  /*
+   * "I am a member" step. The email checked here IS the booking email on
+   * purpose — checkout prices against whatever email the booking carries, so
+   * verifying one address and booking under another would quietly charge the
+   * standard rate after showing the member one.
+   */
+  const [memberPanelOpen, setMemberPanelOpen] = useState(false);
+  const [memberCheck, setMemberCheck] =
+    useState<"idle" | "checking" | "yes" | "no" | "error">("idle");
+
+  const runMemberCheck = async () => {
+    const addr = email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) { setMemberCheck("error"); return; }
+    setMemberCheck("checking");
+    try {
+      const r = await fetch(`/api/book/member-check?email=${encodeURIComponent(addr)}`);
+      const d = await r.json();
+      if (!r.ok) { setMemberCheck("error"); return; }
+      setMemberCheck(d.member ? "yes" : "no");
+      setIsMember(Boolean(d.member));
+    } catch {
+      setMemberCheck("error");
+    }
+  };
 
   useEffect(() => {
     if (tour) { setQuote(null); return; }
@@ -434,7 +460,7 @@ export default function BookingPage() {
                           type="button"
                           onClick={() => {
                             setSelectedSpace(space);
-                            setHours(space.fixedHours ?? space.minHours);
+                            setHours(defaultHoursFor(space));
                           }}
                           className={`text-left p-3 border transition-all duration-200 ${
                             isSelected ? "border-black bg-black text-white" : "border-black/12 hover:border-black/40 bg-white"
@@ -733,7 +759,68 @@ export default function BookingPage() {
                     </p>
                   )}
 
-                  {!isMember && (
+                  {/* "I am a member" — verified against Deskworks / our member
+                      list, because the member rate is real money off. */}
+                  {!tour && (
+                    quote?.member ? (
+                      <div className="w-full flex items-center justify-center gap-2 font-sans text-xs font-semibold tracking-[0.14em] uppercase border border-black bg-black text-white py-3.5">
+                        <Check size={13} /> Member rate applied
+                      </div>
+                    ) : !memberPanelOpen ? (
+                      <button
+                        type="button"
+                        onClick={() => setMemberPanelOpen(true)}
+                        className="w-full flex items-center justify-center gap-2 font-sans text-xs font-semibold tracking-[0.18em] uppercase border border-black py-3.5 text-black hover:bg-black hover:text-white transition-all duration-200"
+                      >
+                        <Tag size={12} /> I am a Member
+                      </button>
+                    ) : (
+                      <div className="w-full border border-black/20 p-4 space-y-3">
+                        <p className="font-sans text-[11px] text-black/55 leading-relaxed">
+                          Enter the email on your membership. We'll check it and apply your member
+                          rate — your booking is made under this address too.
+                        </p>
+                        <input
+                          type="email"
+                          value={email}
+                          onChange={(e) => { setEmail(e.target.value); setMemberCheck("idle"); }}
+                          placeholder="you@example.com"
+                          className="w-full border border-black/20 px-3 py-2.5 font-sans text-sm focus:border-black focus:outline-none"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={runMemberCheck}
+                            disabled={memberCheck === "checking"}
+                            className="flex-1 font-sans text-[11px] font-semibold tracking-[0.16em] uppercase bg-black text-white py-2.5 disabled:opacity-50"
+                          >
+                            {memberCheck === "checking" ? "Checking…" : "Check my membership"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setMemberPanelOpen(false); setMemberCheck("idle"); }}
+                            className="px-4 font-sans text-[11px] font-semibold tracking-[0.16em] uppercase border border-black/20 text-black/50 hover:border-black hover:text-black"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        {memberCheck === "no" && (
+                          <p className="font-sans text-[11px] text-black/60 leading-relaxed">
+                            We couldn't find a membership for that email, so this stays at the
+                            standard rate. Try the address on your membership, or call
+                            (678) 519-4723 and we'll sort it out.
+                          </p>
+                        )}
+                        {memberCheck === "error" && (
+                          <p className="font-sans text-[11px] text-red-600 leading-relaxed">
+                            Please enter a valid email address and try again.
+                          </p>
+                        )}
+                      </div>
+                    )
+                  )}
+
+                  {!quote?.member && (
                     <a
                       href="https://jvo.satellitedeskworks.com/member-sign-up"
                       target="_blank"

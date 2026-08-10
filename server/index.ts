@@ -23,10 +23,10 @@ import { mountMailboxApplication } from "./mailboxApplication.js";
 import { mountChat } from "./chat.js";
 import { getScopedClient } from "./googleAuth.js";
 import { sendBookingEmails } from "./bookingEmail.js";
+import { verifyMember } from "./memberLookup.js";
 import {
   mountBookingPayments,
   pendingHolds,
-  isVerifiedMember,
   paymentsConfigured,
   type ConfirmedBooking,
 } from "./bookingPayments.js";
@@ -430,7 +430,7 @@ async function startServer() {
      * be given away for nothing by anyone POSTing here directly. The member rate
      * is decided by the members table, never by a flag from the browser.
      */
-    const member = isVerifiedMember(String(email));
+    const member = (await verifyMember(String(email))).member;
     if (priceFor(booked, nHours, member) > 0) {
       return res.status(402).json({
         error: "This space has to be paid for at booking.",

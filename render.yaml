@@ -98,6 +98,23 @@ services:
       # a wrong value sends paying customers to a dead success page.
       - key: PUBLIC_BASE_URL
         value: "https://jonesborovirtualoffice.com"
+      # ── Member rate verification ──────────────────────────────────────────
+      # "I am a member" on the booking form checks the email here first, then
+      # falls back to the local members table. Same credentials as jvo-events.
+      - key: DESKWORKS_API_KEY
+        sync: false
+      - key: DESKWORKS_BASE_URL
+        value: "https://jvo.satellitedeskworks.com"
+      # The path that looks a member up by email, with a {email} placeholder,
+      # e.g. "/api/v1/centers/6/users?email={email}".
+      # DELIBERATELY UNSET: the token currently issued for this account is a
+      # read-only *catalog* token — it serves /centers and
+      # /centers/:id/reservations but 404s on every user/member/customer path.
+      # Until Deskworks issues a member-scoped token and confirms the path,
+      # member checks use the local members table only. Setting this var is the
+      # only change needed to switch Deskworks on — no code change.
+      - key: DESKWORKS_MEMBER_PATH
+        sync: false
       # Optional: defaults to claude-opus-5. Set CHAT_MODEL=claude-haiku-4-5
       # for a cheaper, faster FAQ bot if volume grows.
       - key: CHAT_MODEL

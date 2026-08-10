@@ -39,6 +39,8 @@ export interface BookingDetails {
   durationLabel: string;
   notes?: string;
   htmlLink?: string;
+  /** Dollars actually charged through Stripe. Omitted for free bookings. */
+  amountPaid?: number;
 }
 
 /** Two-column detail rows — the part people actually scan for. */
@@ -70,6 +72,9 @@ export async function sendBookingEmails(
     ["Date", b.dateLabel],
     ["Time", `${b.startTime} – ${b.endTime}`],
     ["Duration", b.durationLabel],
+    // Doubles as the customer's receipt — it's the only confirmation of the
+    // charge they get from us, so it belongs above the fold, not in a footer.
+    ["Paid", b.amountPaid !== undefined ? `$${b.amountPaid.toFixed(2)}` : undefined],
     ["Notes", b.notes],
   ];
 

@@ -31,6 +31,7 @@ import {
   startTimesFor,
   DEFAULT_START_TIME,
 } from "@shared/booking";
+import { DEFAULT_CARD_FEE_PERCENT, cardFeeCents } from "@shared/billing";
 
 type BusyBlock = { start: number; end: number };
 
@@ -166,7 +167,9 @@ export default function BookingPage() {
    * rather than letting someone tick "Member" and meet a bigger number on the
    * Stripe page.
    */
-  const [quote, setQuote] = useState<{ amount: number; rate: number; member: boolean } | null>(null);
+  const [quote, setQuote] = useState<
+    { amount: number; rate: number; member: boolean; fee?: number; total?: number; feePercent?: number } | null
+  >(null);
 
   /*
    * "I am a member" step. The email checked here IS the booking email on
@@ -214,9 +217,21 @@ export default function BookingPage() {
     return () => { cancelled = true; clearTimeout(timer); };
   }, [email, selectedSpace.id, hours, tour]);
 
-  /** What we show. Server quote wins the moment we have one. */
+  /*
+   * What we show. The server quote wins the moment we have one — for the fee as
+   * much as the rate. Until then the local estimate uses the default percent, so
+   * the number on the button doesn't jump once the quote lands.
+   */
   const shownRate  = quote ? quote.rate : pricePerHour;
-  const shownTotal = quote ? quote.amount : subtotal;
+  const shownSubtotal = quote ? quote.amount : subtotal;
+  const shownFeePercent = quote?.feePercent ?? DEFAULT_CARD_FEE_PERCENT;
+  const shownFee = tour
+    ? 0
+    : quote?.fee !== undefined
+      ? quote.fee
+      : cardFeeCents(shownSubtotal * 100, shownFeePercent) / 100;
+  /** What the card is actually charged: the room plus the processing fee. */
+  const shownTotal = shownSubtotal + shownFee;
   const shownMember = quote ? quote.member : isMember;
   /** They ticked "Member" but the email isn't on an active membership. */
   const memberClaimUnverified = Boolean(quote && isMember && !quote.member);
@@ -704,6 +719,25 @@ export default function BookingPage() {
                           </span>
                         </div>
                       ))}
+                      {/*
+                        The card fee is itemised rather than folded into the total:
+                        a number on the Stripe page that doesn't match the one here
+                        reads as a bait and switch, however small the difference.
+                      */}
+                      {!tour && shownFee > 0 && (
+                        <>
+                          <div className="border-t border-white/10 pt-3 flex justify-between gap-3">
+                            <span className="font-sans text-[10px] uppercase tracking-[0.12em] text-white/40">Subtotal</span>
+                            <span className="font-sans text-xs text-right text-white/80">{money(shownSubtotal)}</span>
+                          </div>
+                          <div className="flex justify-between gap-3">
+                            <span className="font-sans text-[10px] uppercase tracking-[0.12em] text-white/40">
+                              Card fee ({shownFeePercent}%)
+                            </span>
+                            <span className="font-sans text-xs text-right text-white/80">{money(shownFee)}</span>
+                          </div>
+                        </>
+                      )}
                       <div className="border-t border-white/10 pt-3 flex justify-between items-baseline">
                         <span className="font-sans text-[10px] uppercase tracking-[0.12em] text-white/40">Total</span>
                         <span className="font-mono text-2xl font-semibold text-white">{tour ? "Free" : money(shownTotal)}</span>
@@ -756,6 +790,7 @@ export default function BookingPage() {
                     <p className="font-sans text-[11px] text-black/45 leading-relaxed text-center">
                       You'll pay securely through Stripe. Your slot is held while you check out, and
                       is only confirmed once payment goes through.
+                      {shownFee > 0 && ` Card payments include a ${shownFeePercent}% processing fee.`}
                     </p>
                   )}
 

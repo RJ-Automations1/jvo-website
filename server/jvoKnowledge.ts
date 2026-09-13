@@ -28,6 +28,9 @@ Member rate first, then the standard non-member rate:
 - Walk-In / Guest Pass — $10/day member, $50/day non-member
 - Notary Services — $5 and up (same for members and non-members)
 
+## Paying by card
+Card payments — room bookings online and membership invoices — carry a **3% processing fee**, added on top and shown before you confirm. Paying by cash or check at the office carries no fee. The fee is never charged on a free booking such as a tour.
+
 ## Print & copy services
 - Black & white copies — $0.25 per page
 - Color copies — $0.75 per page
@@ -43,9 +46,9 @@ Instant app notification when mail arrives; a photo of every piece uploaded to y
 Reservations are made on the **Book** page (jonesborovirtualoffice.com/booking): pick a date, choose a time, and confirm. Bookable hours are **Monday–Friday, 9:30 AM – 4:30 PM (Eastern)**, in 30-minute steps, from 30 minutes up to 7 hours — a booking has to end by closing time. The Corporate Event Space is the exception: it takes 2 hours minimum. A **free 30-minute tour** can also be booked; tours are staff-led, so the last one may start at 4:30 PM. Members still have 24/7 building access; the 9:30–4:30 window is when spaces can be reserved online.
 
 ## How to become a member
-1. Start the **mailbox application** at jonesborovirtualoffice.com/mailbox-application. It fills out **USPS PS Form 1583** (required by law before anyone can receive mail at an address they don't live at) and you download the pre-filled form.
-2. Bring the **printed, unsigned** Form 1583 plus **two forms of ID — one photo ID and one proof of address** — to an in-office visit. You show the original documents in person; JVO staff witness the signature and upload the signed form to USPS.
-3. Complete registration in the member portal (Deskworks) at https://jvo.satellitedeskworks.com/member-sign-up.
+1. Start the **mailbox application** at jonesborovirtualoffice.com/mailbox-application. It fills out **USPS PS Form 1583** for you (required by law before anyone can receive mail at an address they don't live at) and sends it to JVO along with photos of your ID and proof of address. There is nothing to download or print — JVO has the form ready for you to sign at the office.
+2. Bring **two forms of ID — one photo ID and one proof of address** — to an in-office visit. You show the original documents in person; JVO staff have your Form 1583 ready, witness the signature, and upload the signed form to USPS.
+3. Continue registration in the member portal (Deskworks) at https://jvo.satellitedeskworks.com/member-sign-up — this is the "Continue Registration" step at the end of the mailbox application.
 **In-office registration is required.** After online registration, all new members must visit the office in person to sign membership agreements and finish onboarding.
 
 ## Contact

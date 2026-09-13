@@ -1,11 +1,14 @@
 /*
  * JVO Mailbox Application — /mailbox-application
- * Onboarding questionnaire that pre-fills the applicant's USPS PS Form 1583 entirely
- * in the browser and hands them a ready-to-sign PDF plus the ID checklist to bring to
- * their in-office visit. On generate, the form and the applicant's uploaded ID /
- * proof-of-address images are sent to JVO (see lib/fileApplication.ts): Dropbox folder,
- * a row on the client master sheet, and a team email. Uploads are required — see
- * validate() — but never replace inspecting the original documents in person.
+ * Onboarding questionnaire that fills the applicant's USPS PS Form 1583 in the browser
+ * and then hands them on to registration. On "Continue Registration" the form and the
+ * uploaded ID / proof-of-address images go to JVO (see lib/fileApplication.ts): Dropbox
+ * folder, a row on the client master sheet, and a team email. Uploads are required —
+ * see validate() — but never replace inspecting the original documents in person.
+ *
+ * The applicant never downloads or prints anything — business or residential. JVO holds
+ * the filled form and has it ready to sign at the visit. The PDF bytes exist only long
+ * enough to be sent to JVO (and kept in memory for a retry).
  *
  * USPS requires TWO documents: (1) a government photo ID and (2) proof of the home
  * address on the form. A driver's/state ID may satisfy only ONE of the two.
@@ -14,16 +17,18 @@
 
 import { useState } from "react";
 import {
-  ArrowLeft, ArrowRight, Check, Download, ShieldCheck, IdCard,
-  FileText, AlertTriangle, MapPin, Building2, User, ExternalLink,
+  ArrowLeft, ArrowRight, Check, ShieldCheck, IdCard,
+  FileText, AlertTriangle, MapPin, Building2, User, ExternalLink, Info,
 } from "lucide-react";
 import { Link, useSearch } from "wouter";
 
 const DESKWORKS_SIGNUP_URL = "https://jvo.satellitedeskworks.com/member-sign-up";
+/** The site's accent gold (same value as the JVO Events tab in the navbar). */
+const GOLD = "#c9a96a";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import {
-  fill1583, downloadBytes, PHOTO_ID_LABELS, ADDRESS_ID_LABELS, CMRA,
+  fill1583, PHOTO_ID_LABELS, ADDRESS_ID_LABELS, CMRA,
   type Form1583Data, type PhotoIdType, type AddressIdType, type ServiceType,
 } from "@/lib/fill1583";
 import { fileApplicationWithJvo, type DocKind } from "@/lib/fileApplication";
@@ -69,6 +74,23 @@ const initialState: State = {
   authFirst: "", authMiddle: "", authLast: "", authPhone: "", authEmail: "",
   authHome: emptyAddr(),
 };
+
+/**
+ * What the two service types actually mean for the applicant — USPS treats them
+ * differently, and picking the wrong one is the most common reason a 1583 has to be
+ * redone. Surfaced behind the gold info icon on the service step.
+ */
+const COMMERCIAL_DETAIL = [
+  "Choose Commercial when the mailbox belongs to a business — an LLC, corporation, nonprofit, DBA, or a sole proprietorship trading under its own name.",
+  "Mail and packages addressed to the business name are accepted, and JVO becomes the address you can use on your website, invoices, Google listing, and state filings. Form 1583 will also ask for your business address and where the business is registered.",
+  "The business name on your application has to match your registration, and you sign as the person authorized to receive its mail.",
+];
+
+const RESIDENTIAL_DETAIL = [
+  "Choose Residential / Personal when the mailbox is for you as an individual — personal mail and packages, with no business name on the box.",
+  "A private street address instead of your home one: useful for deliveries, while you travel, or simply to keep your home address off public records.",
+  "USPS only lets us hand over mail for the people named on the form, so every adult who will receive mail at this box files their own Form 1583. Children living at your address are covered by yours.",
+];
 
 const PHOTO_ID_OPTIONS = Object.keys(PHOTO_ID_LABELS) as PhotoIdType[];
 const ADDRESS_ID_OPTIONS = Object.keys(ADDRESS_ID_LABELS) as AddressIdType[];
@@ -129,11 +151,11 @@ export default function MailboxApplication() {
   const [s, setS] = useState<State>(initialState);
   const [stepIdx, setStepIdx] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [generated, setGenerated] = useState(false);
-  // Filing the copy to JVO runs after the download and never blocks it.
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [filing, setFiling] = useState<"idle" | "sending" | "sent" | "failed">("idle");
-  // Kept so a retry can re-send without regenerating the form.
+  // Kept so a retry can re-send — and so a business applicant can save a copy —
+  // without rebuilding the form.
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
 
   const upd = (patch: Partial<State>) => setS((prev) => ({ ...prev, ...patch }));
@@ -279,28 +301,45 @@ export default function MailboxApplication() {
   }
 
   /**
-   * Generate the PDF and save it to the visitor's device. On the first pass we also
-   * send everything to JVO; the "download again" button skips that so a second click
-   * doesn't file a duplicate.
+   * Build the 1583 and file it with JVO, then hand them on to registration.
+   *
+   * Nothing is downloaded, by anyone. The applicant's next step is finishing
+   * registration, not managing a PDF: JVO has the form in Dropbox and prints it for
+   * the in-office visit.
    */
-  async function handleGenerate(alsoSend = true) {
-    setGenerating(true);
+  async function handleContinue() {
+    setSubmitting(true);
     setError(null);
     let bytes: Uint8Array;
     try {
-      const filename = `PS-Form-1583-${s.lastName || "JVO"}.pdf`;
       bytes = await fill1583(toFormData());
-      downloadBytes(bytes, filename);
       setPdfBytes(bytes);
-      setGenerated(true);
+      setSubmitted(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not generate the PDF. Please try again.");
+      setError(e instanceof Error ? e.message : "Could not prepare your form. Please try again.");
       return;
     } finally {
-      setGenerating(false);
+      setSubmitting(false);
     }
 
-    if (alsoSend) await sendToJvo(bytes);
+    await sendToJvo(bytes);
+  }
+
+  /**
+   * Jump back to a step from the review summary.
+   *
+   * Returns undefined once the application has been filed: at that point the
+   * Continue button is gone, so an edit would change the form on screen without
+   * ever reaching JVO — a corrected name that silently doesn't get corrected.
+   * After filing, corrections go through the office (see the note on screen).
+   */
+  function editStep(id: StepId): (() => void) | undefined {
+    if (submitted) return undefined;
+    return () => {
+      setError(null);
+      setStepIdx(steps.indexOf(id));
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
   }
 
   return (
@@ -324,10 +363,10 @@ export default function MailboxApplication() {
           </h1>
           <p className="font-sans text-sm text-white/45 mt-3 leading-relaxed">
             Every JVO membership includes a mailbox, so we start by preparing your USPS Form 1583 — the
-            form that authorizes JVO to receive mail on your behalf. Then you'll finish registration.
+            form that authorizes JVO to receive mail on your behalf. Then you'll continue to registration.
             You'll also upload photos of your ID and proof of address. Everything stays on your device
-            until you generate the form — then it's sent to JVO so we can prep your mailbox before
-            your visit. You still bring the original documents with you.
+            until you continue — then it goes to JVO so we can prep your mailbox and have your form
+            ready to sign before your visit. You still bring the original documents with you.
           </p>
         </div>
 
@@ -386,8 +425,9 @@ export default function MailboxApplication() {
               <ShieldCheck size={16} className="text-white/50 flex-shrink-0 mt-0.5" />
               <p className="font-sans text-xs text-white/45 leading-relaxed">
                 <span className="text-white/70 font-medium">Your privacy:</span> this questionnaire runs
-                entirely in your browser. Your answers are used to fill the PDF on your own device and are
-                not sent to any server.
+                entirely in your browser. Your answers fill the PDF on your own device, and nothing leaves
+                it until you continue to registration at the end — at which point your form and documents
+                go to JVO alone.
               </p>
             </div>
 
@@ -405,8 +445,10 @@ export default function MailboxApplication() {
                 selected={s.serviceType === "business"}
                 onClick={() => upd({ serviceType: "business" })}
                 icon={<Building2 size={18} />}
-                title="Business / Organization"
+                title="Business / Organization (Commercial)"
                 body="For an LLC, corporation, nonprofit, or any registered business receiving mail."
+                detailTitle="What Commercial means"
+                detail={COMMERCIAL_DETAIL}
               />
               <ChoiceCard
                 selected={s.serviceType === "residential"}
@@ -414,8 +456,15 @@ export default function MailboxApplication() {
                 icon={<User size={18} />}
                 title="Residential / Personal"
                 body="For personal mail. Note: each adult using the mailbox files a separate form."
+                detailTitle="What Residential means"
+                detail={RESIDENTIAL_DETAIL}
               />
             </div>
+            <p className="font-sans text-xs text-white/35 leading-relaxed mt-4">
+              Not sure which fits? Tap the{" "}
+              <Info size={12} className="inline -mt-0.5" style={{ color: GOLD }} /> beside either option
+              for a fuller explanation. You can change this later with <span className="text-white/55">Edit</span> on the review screen.
+            </p>
           </StepShell>
         )}
 
@@ -575,24 +624,24 @@ export default function MailboxApplication() {
         {step === "review" && (
           <div className="space-y-8">
             <div>
-              <h2 className="font-display text-xl font-semibold text-white mb-1">Review &amp; generate</h2>
+              <h2 className="font-display text-xl font-semibold text-white mb-1">Review &amp; continue</h2>
               <p className="font-sans text-sm text-white/45 leading-relaxed">
-                Check the summary, then download your pre-filled PS Form 1583. Your form and uploaded
-                documents go to JVO at the same time. Bring the printed form (unsigned) and your two
-                original IDs to your in-office visit.
+                Check the summary, then continue to registration. Your PS Form 1583 and uploaded
+                documents go to JVO as you continue — we print the form and have it ready for you to
+                sign at your in-office visit. Bring your two original IDs.
               </p>
             </div>
 
             <div className="border border-white/12 divide-y divide-white/10">
-              <SummaryRow label="Service" value={s.serviceType === "business" ? "Business / Organization" : "Residential / Personal"} onEdit={() => setStepIdx(steps.indexOf("service"))} />
-              <SummaryRow label="Applicant" value={[s.firstName, s.middleInitial, s.lastName].filter(Boolean).join(" ")} onEdit={() => setStepIdx(steps.indexOf("applicant"))} />
-              <SummaryRow label="Contact" value={`${s.phone} · ${s.email}`} onEdit={() => setStepIdx(steps.indexOf("applicant"))} />
-              <SummaryRow label="Home address" value={`${s.home.street}, ${s.home.city}, ${s.home.state} ${s.home.zip}`} onEdit={() => setStepIdx(steps.indexOf("applicant"))} />
+              <SummaryRow label="Service" value={s.serviceType === "business" ? "Business / Organization" : "Residential / Personal"} onEdit={editStep("service")} />
+              <SummaryRow label="Applicant" value={[s.firstName, s.middleInitial, s.lastName].filter(Boolean).join(" ")} onEdit={editStep("applicant")} />
+              <SummaryRow label="Contact" value={`${s.phone} · ${s.email}`} onEdit={editStep("applicant")} />
+              <SummaryRow label="Home address" value={`${s.home.street}, ${s.home.city}, ${s.home.state} ${s.home.zip}`} onEdit={editStep("applicant")} />
               {s.serviceType === "business" && (
-                <SummaryRow label="Business" value={`${s.bizName} (${s.bizType})`} onEdit={() => setStepIdx(steps.indexOf("business"))} />
+                <SummaryRow label="Business" value={`${s.bizName} (${s.bizType})`} onEdit={editStep("business")} />
               )}
-              <SummaryRow label="Photo ID" value={s.photoIdType ? PHOTO_ID_LABELS[s.photoIdType] : "—"} onEdit={() => setStepIdx(steps.indexOf("photoId"))} />
-              <SummaryRow label="Address proof" value={s.addressIdType ? ADDRESS_ID_LABELS[s.addressIdType] : "—"} onEdit={() => setStepIdx(steps.indexOf("addressId"))} />
+              <SummaryRow label="Photo ID" value={s.photoIdType ? PHOTO_ID_LABELS[s.photoIdType] : "—"} onEdit={editStep("photoId")} />
+              <SummaryRow label="Address proof" value={s.addressIdType ? ADDRESS_ID_LABELS[s.addressIdType] : "—"} onEdit={editStep("addressId")} />
               <SummaryRow
                 label="Uploads"
                 value={[
@@ -600,10 +649,10 @@ export default function MailboxApplication() {
                   s.photoIdBack.length ? "ID back" : null,
                   s.addressDocs.length ? `${s.addressDocs.length} address ${s.addressDocs.length === 1 ? "file" : "files"}` : null,
                 ].filter(Boolean).join(" · ") || "None yet"}
-                onEdit={() => setStepIdx(steps.indexOf("photoId"))}
+                onEdit={editStep("photoId")}
               />
               {s.hasAuthorized && (
-                <SummaryRow label="Authorized" value={[s.authFirst, s.authLast].filter(Boolean).join(" ")} onEdit={() => setStepIdx(steps.indexOf("authorized"))} />
+                <SummaryRow label="Authorized" value={[s.authFirst, s.authLast].filter(Boolean).join(" ")} onEdit={editStep("authorized")} />
               )}
               <SummaryRow
                 label="Delivery address (JVO)"
@@ -611,14 +660,14 @@ export default function MailboxApplication() {
               />
             </div>
 
-            {!generated ? (
+            {!submitted ? (
               <div>
-                <button onClick={() => handleGenerate()} disabled={generating || !docsComplete} className={btnPrimary}>
-                  {generating ? "Generating…" : (<>Download Pre-Filled Form <Download size={14} /></>)}
+                <button onClick={handleContinue} disabled={submitting || !docsComplete} className={btnPrimary}>
+                  {submitting ? "Submitting…" : (<>Continue Registration <ArrowRight size={14} /></>)}
                 </button>
                 {!docsComplete && (
                   <p className="font-sans text-xs text-amber-200/70 mt-3 leading-relaxed">
-                    Add photos of both sides of your ID and your proof of address before generating the form.
+                    Add photos of both sides of your ID and your proof of address before continuing.
                   </p>
                 )}
               </div>
@@ -627,9 +676,12 @@ export default function MailboxApplication() {
                 <div className="flex items-start gap-3 border border-emerald-500/30 bg-emerald-500/10 px-5 py-4">
                   <Check size={16} className="text-emerald-400 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-sans text-sm text-emerald-200/90 font-medium">Your form downloaded.</p>
+                    <p className="font-sans text-sm text-emerald-200/90 font-medium">
+                      Your mailbox application is complete.
+                    </p>
                     <p className="font-sans text-xs text-emerald-200/60 mt-1 leading-relaxed">
-                      Don't sign it yet — you'll sign in front of JVO staff at your visit.
+                      Your Form 1583 is filled in and waiting at the office — don't sign anything yet,
+                      you'll sign it in front of JVO staff at your visit.
                     </p>
                     {filing === "sending" && (
                       <p className="font-sans text-xs text-emerald-200/60 mt-2">
@@ -639,14 +691,15 @@ export default function MailboxApplication() {
                     {filing === "sent" && (
                       <p className="font-sans text-xs text-emerald-200/60 mt-2">
                         JVO has your application and your uploaded documents on file, and will have
-                        everything ready for your visit.
+                        everything ready for your visit. Next step is below.
                       </p>
                     )}
                     {filing === "failed" && (
                       <div className="mt-2">
                         <p className="font-sans text-xs text-amber-200/70 leading-relaxed">
-                          Your documents didn't reach JVO. Your form downloaded fine — you can retry, or
-                          just bring the printed form and your IDs to your visit.
+                          Your form and documents didn't reach JVO. Please retry — if it still won't go
+                          through, continue to registration anyway and bring your IDs to your visit; we'll
+                          fill the form with you at the office.
                         </p>
                         <button
                           onClick={() => pdfBytes && sendToJvo(pdfBytes)}
@@ -662,30 +715,38 @@ export default function MailboxApplication() {
                 <div className="border border-white/12 bg-white/[0.03] p-6">
                   <h3 className="font-display text-base font-semibold text-white mb-4">Bring to your in-office visit</h3>
                   <ul className="space-y-3">
-                    <BringItem>The printed PS Form 1583 (unsigned)</BringItem>
                     <BringItem>Photo ID — {s.photoIdType ? PHOTO_ID_LABELS[s.photoIdType] : "government photo ID"}</BringItem>
                     <BringItem>Address proof — {s.addressIdType ? ADDRESS_ID_LABELS[s.addressIdType] : "proof of address"}</BringItem>
                     {s.courtProtected && <BringItem>A copy of your court protection order</BringItem>}
+                    <BringItem>
+                      Nothing to print — we have your Form 1583 ready at the office for you to sign
+                    </BringItem>
                   </ul>
                   <div className="flex items-start gap-3 mt-5 pt-5 border-t border-white/10">
                     <MapPin size={15} className="text-white/50 flex-shrink-0 mt-0.5" />
                     <p className="font-sans text-sm text-white/45 leading-relaxed">
                       <span className="text-white/70 font-medium">{CMRA.streetDisplay}, {CMRA.city}, {CMRA.state} {CMRA.zip}</span>
-                      <br />Line 2a has a blank for the suite number — staff will give you yours to write in.
-                      <br />JVO staff will witness your signature and file the form with USPS.
+                      <br />Staff will fill in your suite number and witness your signature, then file the
+                      form with USPS.
                     </p>
                   </div>
                 </div>
 
-                {/* Step 2 — continue to member registration */}
-                <div className="border border-white/12 bg-white/[0.03] p-6">
-                  <p className="font-sans text-[10px] font-semibold tracking-[0.3em] uppercase text-white/30 mb-2">
+                {/* Step 2 — the next step, and the only thing left for them to do */}
+                <div className="border p-6" style={{ borderColor: `${GOLD}45`, background: `${GOLD}0D` }}>
+                  <p
+                    className="font-sans text-[10px] font-semibold tracking-[0.3em] uppercase mb-2"
+                    style={{ color: GOLD }}
+                  >
                     {plan ? `${plan} Plan · Step 2 of 2` : "Step 2 of 2"}
                   </p>
-                  <h3 className="font-display text-base font-semibold text-white mb-2">Complete your registration</h3>
-                  <p className="font-sans text-sm text-white/45 leading-relaxed mb-5">
-                    Finish setting up your {plan ? `${plan} ` : ""}membership in our secure registration portal.
-                    You'll bring the form and IDs above to your in-office visit to finish onboarding.
+                  <h3 className="font-display text-base font-semibold text-white mb-2">
+                    Next step — complete your registration
+                  </h3>
+                  <p className="font-sans text-sm text-white/50 leading-relaxed mb-5">
+                    One step left: finish setting up your {plan ? `${plan} ` : ""}membership in our secure
+                    registration portal, where you'll choose your start date and set up billing. Then come
+                    in with your two IDs and we'll sign your Form 1583 together.
                   </p>
                   <a
                     href={DESKWORKS_SIGNUP_URL}
@@ -693,13 +754,24 @@ export default function MailboxApplication() {
                     rel="noopener noreferrer"
                     className={btnPrimary}
                   >
-                    Continue to Registration <ExternalLink size={13} />
+                    Continue Registration <ExternalLink size={13} />
                   </a>
                 </div>
 
-                <button onClick={() => handleGenerate(false)} className={btnGhost}>
-                  <Download size={13} /> Download form again
-                </button>
+                {/*
+                  The summary above loses its Edit links once this is filed, so say
+                  plainly how a mistake gets fixed — a wrong name on a USPS form is
+                  worth a phone call.
+                */}
+                <p className="font-sans text-xs text-white/35 leading-relaxed">
+                  Spotted something wrong above? Call{" "}
+                  <a href="tel:+16785194723" className="text-white/60 hover:text-white transition-colors">678-519-4723</a>{" "}
+                  or email{" "}
+                  <a href="mailto:jonesborovirtualoffice@gmail.com" className="text-white/60 hover:text-white transition-colors">
+                    jonesborovirtualoffice@gmail.com
+                  </a>{" "}
+                  and we'll correct your form before your visit — nothing is filed with USPS until you sign it in person.
+                </p>
               </div>
             )}
           </div>
@@ -712,7 +784,7 @@ export default function MailboxApplication() {
             <button onClick={next} className={btnPrimary}>Continue <ArrowRight size={14} /></button>
           </div>
         )}
-        {step === "review" && !generated && (
+        {step === "review" && !submitted && (
           <div className="mt-8">
             <button onClick={back} className={btnGhost}><ArrowLeft size={13} /> Back</button>
           </div>
@@ -754,23 +826,70 @@ function IdCallout({ n, title, body }: { n: number; title: string; body: string 
   );
 }
 
-function ChoiceCard({ selected, onClick, icon, title, body }: {
+/**
+ * A service-type option. The gold info button is a SIBLING of the select button,
+ * never nested inside it — a button within a button is invalid markup, and tapping
+ * "what does this mean?" must not silently pick the option you were asking about.
+ */
+function ChoiceCard({ selected, onClick, icon, title, body, detail, detailTitle }: {
   selected: boolean; onClick: () => void; icon: React.ReactNode; title: string; body: string;
+  detail?: string[]; detailTitle?: string;
 }) {
+  const [open, setOpen] = useState(false);
   return (
-    <button
-      onClick={onClick}
-      className={`text-left flex items-start gap-4 border px-5 py-4 transition-all ${
+    <div
+      className={`relative border transition-all ${
         selected ? "border-white bg-white/[0.07]" : "border-white/15 bg-white/[0.02] hover:border-white/35"
       }`}
     >
-      <span className={selected ? "text-white" : "text-white/50"}>{icon}</span>
-      <div>
-        <p className="font-sans text-sm font-semibold text-white">{title}</p>
-        <p className="font-sans text-xs text-white/45 leading-relaxed mt-1">{body}</p>
-      </div>
-      {selected && <Check size={16} className="text-white ml-auto flex-shrink-0" />}
-    </button>
+      <button
+        onClick={onClick}
+        className={`w-full text-left flex items-start gap-4 px-5 py-4 ${detail ? "pr-20" : "pr-12"}`}
+      >
+        <span className={selected ? "text-white" : "text-white/50"}>{icon}</span>
+        <div>
+          <p className="font-sans text-sm font-semibold text-white">{title}</p>
+          <p className="font-sans text-xs text-white/45 leading-relaxed mt-1">{body}</p>
+        </div>
+      </button>
+
+      {selected && (
+        <Check size={16} className={`text-white absolute top-5 ${detail ? "right-14" : "right-5"}`} />
+      )}
+
+      {detail && (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-label={detailTitle || `More about ${title}`}
+          title={detailTitle || `More about ${title}`}
+          className="absolute top-4 right-4 p-1 hover:opacity-70 transition-opacity"
+          style={{ color: GOLD }}
+        >
+          <Info size={17} />
+        </button>
+      )}
+
+      {detail && open && (
+        <div
+          className="px-5 py-4 border-t"
+          style={{ borderColor: `${GOLD}40`, background: `${GOLD}0F` }}
+        >
+          <p
+            className="font-sans text-[10px] font-semibold tracking-[0.2em] uppercase mb-2"
+            style={{ color: GOLD }}
+          >
+            {detailTitle || "What this means"}
+          </p>
+          {detail.map((para, i) => (
+            <p key={i} className="font-sans text-xs text-white/60 leading-relaxed mb-2 last:mb-0">
+              {para}
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

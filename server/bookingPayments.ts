@@ -32,6 +32,8 @@ import Stripe from "stripe";
 import type { Database } from "better-sqlite3";
 import { getDb, nowIso } from "./db.js";
 import { verifyMember, deskworksLookupConfigured } from "./memberLookup.js";
+import { cardFeePercent } from "./cardFee.js";
+import { cardFeeCents } from "../shared/billing.js";
 import {
   findSpace,
   formatMinutes,
@@ -90,6 +92,7 @@ export interface HoldRow {
   notes: string | null;
   is_member: number;
   amount_cents: number;
+  fee_cents: number;
   calendar_event_id: string | null;
   expires_at: string;
 }
@@ -169,6 +172,8 @@ export interface ConfirmedBooking {
   startInstant: Date;
   endInstant: Date;
   amountCents: number;
+  /** Card surcharge charged on top of amountCents (0 when the fee is off). */
+  feeCents: number;
   isMember: boolean;
 }
 
@@ -179,7 +184,21 @@ export interface PaymentDeps {
   hasConflict: (spaceId: string, startIso: string, endIso: string) => Promise<boolean>;
   /** Office-local wall time → UTC instant. */
   wallToInstant: (dateStr: string, hour: number, minute: number) => Date;
+  /**
+   * Invoice payments ride the SAME Stripe webhook endpoint — Stripe sends every
+   * event for the account to one URL, so this router dispatches on
+   * metadata.kind rather than each feature registering its own endpoint.
+   * Injected (rather than imported) so payments stay unaware of invoicing.
+   */
+  invoicePayments?: {
+    credit: (session: Stripe.Checkout.Session) => Promise<void>;
+    expire: (session: Stripe.Checkout.Session) => Promise<void>;
+  };
 }
+
+/** Sessions tagged this way belong to an invoice, not a room booking. */
+const INVOICE_KIND = "invoice_payment";
+const isInvoiceSession = (s: Stripe.Checkout.Session) => s.metadata?.kind === INVOICE_KIND;
 
 /* ── Confirmation (idempotent) ────────────────────────────────────────── */
 /**
@@ -212,6 +231,7 @@ async function confirmHold(
     startInstant: new Date(hold.start_iso),
     endInstant: new Date(hold.end_iso),
     amountCents: hold.amount_cents,
+    feeCents: hold.fee_cents || 0,
     isMember: Boolean(hold.is_member),
   });
 
@@ -269,7 +289,11 @@ export function mountBookingPayments(app: Express, deps: PaymentDeps) {
           const session = event.data.object as Stripe.Checkout.Session;
           // `complete` + unpaid happens with delayed payment methods; wait for
           // checkout.session.async_payment_succeeded rather than booking early.
-          if (session.payment_status === "paid") {
+          if (session.payment_status !== "paid") {
+            console.log(`stripe webhook: session ${session.id} complete but unpaid — waiting`);
+          } else if (isInvoiceSession(session)) {
+            await deps.invoicePayments?.credit(session);
+          } else {
             const hold = holdBySession(db, session.id);
             if (hold) {
               await confirmHold(db, hold, deps, String(session.payment_intent || "") || null);
@@ -279,18 +303,27 @@ export function mountBookingPayments(app: Express, deps: PaymentDeps) {
           }
         } else if (event.type === "checkout.session.async_payment_succeeded") {
           const session = event.data.object as Stripe.Checkout.Session;
-          const hold = holdBySession(db, session.id);
-          if (hold) await confirmHold(db, hold, deps, String(session.payment_intent || "") || null);
+          if (isInvoiceSession(session)) {
+            await deps.invoicePayments?.credit(session);
+          } else {
+            const hold = holdBySession(db, session.id);
+            if (hold) await confirmHold(db, hold, deps, String(session.payment_intent || "") || null);
+          }
         } else if (
           event.type === "checkout.session.expired" ||
           event.type === "checkout.session.async_payment_failed"
         ) {
           const session = event.data.object as Stripe.Checkout.Session;
-          // Release the slot: they never paid, so it goes back on sale.
-          db.prepare(
-            `UPDATE booking_holds SET status = 'expired', updated_at = ?
-              WHERE session_id = ? AND status = 'pending'`,
-          ).run(nowIso(), session.id);
+          if (isInvoiceSession(session)) {
+            // The attempt is dead; the invoice balance was never touched.
+            await deps.invoicePayments?.expire(session);
+          } else {
+            // Release the slot: they never paid, so it goes back on sale.
+            db.prepare(
+              `UPDATE booking_holds SET status = 'expired', updated_at = ?
+                WHERE session_id = ? AND status = 'pending'`,
+            ).run(nowIso(), session.id);
+          }
         }
       } catch (e: any) {
         // 500 makes Stripe retry, which is what we want for a transient failure
@@ -319,11 +352,18 @@ export function mountBookingPayments(app: Express, deps: PaymentDeps) {
     }
     const email = String(req.query.email || "");
     const member = EMAIL_RE.test(email) ? (await verifyMember(email)).member : false;
+    const amount = priceFor(space, hours, member);
+    // Quoted in cents so the surcharge rounds exactly once, the same way checkout
+    // rounds it — a fee computed twice from dollars can differ by a cent.
+    const feeCents = cardFeeCents(amount * 100, cardFeePercent());
     res.json({
-      amount: priceFor(space, hours, member),
+      amount,
       rate: member ? space.memberPrice : space.nonMemberPrice,
       member,
-      free: priceFor(space, hours, member) <= 0,
+      free: amount <= 0,
+      feePercent: cardFeePercent(),
+      fee: feeCents / 100,
+      total: amount + feeCents / 100,
     });
   });
 
@@ -384,6 +424,10 @@ export function mountBookingPayments(app: Express, deps: PaymentDeps) {
     // is granted only against the members table.
     const member = (await verifyMember(String(email))).member;
     const amount = priceFor(booked, nHours, member);
+    const amountCents = amount * 100;
+    // Charged on top of the room, as its own line — never folded into the rate,
+    // so the customer can see what the room cost and what the card cost.
+    const feeCents = cardFeeCents(amountCents, cardFeePercent());
     if (amount <= 0) {
       // Tours and anything else free never touch Stripe.
       return res.status(400).json({ error: "That booking is free — no payment needed.", free: true });
@@ -430,7 +474,7 @@ export function mountBookingPayments(app: Express, deps: PaymentDeps) {
             quantity: 1,
             price_data: {
               currency: CURRENCY,
-              unit_amount: amount * 100,
+              unit_amount: amountCents,
               product_data: {
                 name: booked.name,
                 description:
@@ -440,6 +484,21 @@ export function mountBookingPayments(app: Express, deps: PaymentDeps) {
               },
             },
           },
+          ...(feeCents > 0
+            ? [
+                {
+                  quantity: 1,
+                  price_data: {
+                    currency: CURRENCY,
+                    unit_amount: feeCents,
+                    product_data: {
+                      name: `Card processing fee (${cardFeePercent()}%)`,
+                      description: "Applies to card payments.",
+                    },
+                  },
+                },
+              ]
+            : []),
         ],
         // Everything needed to rebuild the booking lives in our own row; this is
         // for reading in the Stripe dashboard when someone asks what a charge was.
@@ -449,6 +508,7 @@ export function mountBookingPayments(app: Express, deps: PaymentDeps) {
           startTime: String(startTime),
           hours: String(nHours),
           member: member ? "yes" : "no",
+          fee: (feeCents / 100).toFixed(2),
         },
         success_url: `${origin}/booking/confirmed?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/booking?canceled=1`,
@@ -458,8 +518,8 @@ export function mountBookingPayments(app: Express, deps: PaymentDeps) {
         `INSERT INTO booking_holds (
            session_id, status, space_id, space_name, start_iso, end_iso, date_str,
            start_time, hours, name, email, phone, notes, is_member, amount_cents,
-           expires_at, created_at, updated_at
-         ) VALUES (?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           fee_cents, expires_at, created_at, updated_at
+         ) VALUES (?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         session.id,
         booked.id,
@@ -474,13 +534,21 @@ export function mountBookingPayments(app: Express, deps: PaymentDeps) {
         phone ? String(phone) : null,
         notes ? String(notes) : null,
         member ? 1 : 0,
-        amount * 100,
+        amountCents,
+        feeCents,
         expiresAt.toISOString(),
         nowIso(),
         nowIso(),
       );
 
-      res.json({ url: session.url, sessionId: session.id, amount, member });
+      res.json({
+        url: session.url,
+        sessionId: session.id,
+        amount,
+        member,
+        fee: feeCents / 100,
+        total: (amountCents + feeCents) / 100,
+      });
     } catch (e: any) {
       console.error("checkout create failed:", e?.message);
       res.status(502).json({ error: "Could not start payment. Please try again or call us." });
@@ -546,6 +614,8 @@ function publicHold(h: HoldRow) {
     startTime: h.start_time,
     hours: h.hours,
     amount: h.amount_cents / 100,
+    fee: (h.fee_cents || 0) / 100,
+    total: (h.amount_cents + (h.fee_cents || 0)) / 100,
     isMember: Boolean(h.is_member),
     name: h.name,
     email: h.email,

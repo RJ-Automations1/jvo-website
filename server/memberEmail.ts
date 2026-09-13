@@ -399,3 +399,143 @@ export async function sendStaffNotification(subject: string, lines: string[]): P
     <p style="color:#6B7280;font-size:13px">Automated notification from the JVO membership pipeline — see /admin for details.</p>`);
   return deliver("staff notification", { to: MAIL_REPLY_TO, subject, text, html });
 }
+
+/* ── Invoicing ────────────────────────────────────────────────────────── */
+/*
+ * Both of these go out via sendTransactional, NOT the MEMBER_EMAILS_ENABLED
+ * gate: one is sent because staff pressed "send invoice", the other is a
+ * receipt for money that has just left the customer's card. Silently holding
+ * either back would be worse than not offering the button.
+ */
+
+export interface InvoiceEmailItem {
+  description: string;
+  quantity: number;
+  unitCents: number;
+}
+
+function money(cents: number): string {
+  const n = (Number(cents) || 0) / 100;
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** The invoice itself, with the pay link. */
+export async function sendInvoiceIssued(args: {
+  to: string;
+  name: string;
+  invoiceNumber: string;
+  items: InvoiceEmailItem[];
+  subtotalCents: number;
+  balanceCents: number;
+  dueDate: string;
+  memo: string;
+  payUrl: string;
+  allowPartial: boolean;
+  minPaymentCents: number;
+  cardFeePercent: number;
+}): Promise<SendResult> {
+  const fn = (args.name || "there").trim().split(/\s+/)[0] || "there";
+  const subject = `Invoice ${args.invoiceNumber} from Jonesboro Virtual Office — ${money(args.balanceCents)}`;
+
+  const lineText = args.items
+    .map((i) => `  • ${i.description}${i.quantity > 1 ? ` × ${i.quantity}` : ""} — ${money(Math.round(i.quantity * i.unitCents))}`)
+    .join("\n");
+  const partialText = args.allowPartial
+    ? `You can pay it in full, or part of it now and the rest later — the smallest payment we can take is ${money(args.minPaymentCents)}.`
+    : `This invoice is payable in full.`;
+  const feeText = args.cardFeePercent > 0
+    ? `Card payments carry a ${args.cardFeePercent}% processing fee, shown before you confirm. Cash or check at the office carries none.`
+    : `No processing fee applies.`;
+
+  const text = `Hi ${fn},
+
+Here is invoice ${args.invoiceNumber} from Jonesboro Virtual Office.
+
+${lineText}
+
+Total: ${money(args.subtotalCents)}
+Balance due: ${money(args.balanceCents)}${args.dueDate ? `\nDue: ${args.dueDate}` : ""}
+${args.memo ? `\n${args.memo}\n` : ""}
+${partialText}
+
+Pay online here:
+${args.payUrl}
+
+${feeText}
+
+Questions about anything on it? Just reply to this email.${TEXT_FOOTER}`;
+
+  const rows = args.items
+    .map(
+      (i) => `<tr>
+        <td style="padding:8px 0;border-bottom:1px solid #F0F0F0">${escapeHtml(i.description)}</td>
+        <td style="padding:8px 0;border-bottom:1px solid #F0F0F0;text-align:right;white-space:nowrap">${i.quantity}</td>
+        <td style="padding:8px 0;border-bottom:1px solid #F0F0F0;text-align:right;white-space:nowrap">${money(Math.round(i.quantity * i.unitCents))}</td>
+      </tr>`,
+    )
+    .join("");
+
+  const html = shell("Your JVO Invoice.", `
+    <p>Hi ${escapeHtml(fn)},</p>
+    <p>Here is invoice <strong>${escapeHtml(args.invoiceNumber)}</strong>${args.dueDate ? `, due <strong>${escapeHtml(args.dueDate)}</strong>` : ""}.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;margin:18px 0 8px">
+      <tr>
+        <th align="left" style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#6B7280;padding-bottom:6px;border-bottom:1px solid #E5E5E5">Item</th>
+        <th align="right" style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#6B7280;padding-bottom:6px;border-bottom:1px solid #E5E5E5">Qty</th>
+        <th align="right" style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#6B7280;padding-bottom:6px;border-bottom:1px solid #E5E5E5">Amount</th>
+      </tr>
+      ${rows}
+      <tr><td colspan="2" style="padding-top:12px;font-weight:600">Balance due</td>
+          <td align="right" style="padding-top:12px;font-weight:600">${money(args.balanceCents)}</td></tr>
+    </table>
+    ${args.memo ? `<p style="color:#6B7280;font-size:13px">${escapeHtml(args.memo)}</p>` : ""}
+    ${button(args.payUrl, "Pay This Invoice")}
+    <p style="font-size:13px;color:#6B7280">${escapeHtml(partialText)} ${escapeHtml(feeText)}</p>
+    <p>Questions about anything on it? Just reply to this email.</p>`);
+
+  return sendTransactional("invoice issued", { to: args.to, subject, text, html });
+}
+
+/** Receipt for one payment — including what, if anything, is still owed. */
+export async function sendPaymentReceipt(args: {
+  to: string;
+  name: string;
+  invoiceNumber: string;
+  amountCents: number;
+  feeCents: number;
+  balanceCents: number;
+  payUrl: string;
+}): Promise<SendResult> {
+  const fn = (args.name || "there").trim().split(/\s+/)[0] || "there";
+  const charged = args.amountCents + (args.feeCents || 0);
+  const settled = args.balanceCents <= 0;
+  const subject = settled
+    ? `Paid in full — receipt for invoice ${args.invoiceNumber}`
+    : `Payment received — invoice ${args.invoiceNumber} (${money(args.balanceCents)} remaining)`;
+
+  const text = `Hi ${fn},
+
+Thank you — we've received your payment on invoice ${args.invoiceNumber}.
+
+Applied to your invoice: ${money(args.amountCents)}${args.feeCents ? `\nCard processing fee:       ${money(args.feeCents)}` : ""}
+Charged to your card:      ${money(charged)}
+
+${settled ? "This invoice is now settled in full. Nothing further is owed." : `Remaining balance: ${money(args.balanceCents)}. You can pay the rest whenever suits, from the same link:\n${args.payUrl}`}${TEXT_FOOTER}`;
+
+  const html = shell(settled ? "Paid in Full." : "Payment Received.", `
+    <p>Hi ${escapeHtml(fn)},</p>
+    <p>Thank you — we've received your payment on invoice <strong>${escapeHtml(args.invoiceNumber)}</strong>.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;margin:16px 0">
+      <tr><td style="padding:6px 0">Applied to your invoice</td><td align="right" style="padding:6px 0">${money(args.amountCents)}</td></tr>
+      ${args.feeCents ? `<tr><td style="padding:6px 0;color:#6B7280">Card processing fee</td><td align="right" style="padding:6px 0;color:#6B7280">${money(args.feeCents)}</td></tr>` : ""}
+      <tr><td style="padding:10px 0 0;font-weight:600;border-top:1px solid #E5E5E5">Charged to your card</td>
+          <td align="right" style="padding:10px 0 0;font-weight:600;border-top:1px solid #E5E5E5">${money(charged)}</td></tr>
+    </table>
+    ${
+      settled
+        ? `<p>This invoice is now <strong>settled in full</strong>. Nothing further is owed.</p>`
+        : `<p>Remaining balance: <strong>${money(args.balanceCents)}</strong>. You can pay the rest whenever suits, from the same link.</p>${button(args.payUrl, "Pay The Balance")}`
+    }`);
+
+  return sendTransactional("payment receipt", { to: args.to, subject, text, html });
+}

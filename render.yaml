@@ -90,14 +90,25 @@ services:
       #   https://jonesborovirtualoffice.com/api/stripe/webhook
       # subscribing to checkout.session.completed, .expired,
       # .async_payment_succeeded and .async_payment_failed.
-      # Without it the webhook rejects every event; bookings then rely on the
-      # slower reconcile-on-return path, so treat this as required.
+      # The SAME endpoint also settles invoice payments (/admin/invoices), which
+      # are told apart by session metadata — there is only one webhook to set up.
+      # Without it the webhook rejects every event; bookings and invoices then
+      # rely on the slower reconcile-on-return path, so treat this as required.
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
-      # Absolute origin Stripe returns customers to. Must be the live domain —
-      # a wrong value sends paying customers to a dead success page.
+      # Absolute origin Stripe returns customers to, and the origin of the
+      # invoice pay links emailed to members. Must be the live domain — a wrong
+      # value sends paying customers to a dead page.
       - key: PUBLIC_BASE_URL
         value: "https://jonesborovirtualoffice.com"
+      # ── Card processing surcharge ─────────────────────────────────────────
+      # Added to CARD payments as its own Stripe line item, on BOTH room
+      # bookings and membership invoices (server/cardFee.ts is the one reader).
+      # Cash and check, recorded by staff, never carry it, and a free booking
+      # such as a tour never attracts one. Set to 0 to switch the fee off
+      # everywhere; capped at 10 in code so a typo can't overcharge.
+      - key: CARD_FEE_PERCENT
+        value: "3"
       # ── Member rate verification ──────────────────────────────────────────
       # "I am a member" on the booking form checks the email here first, then
       # falls back to the local members table. Same credentials as jvo-events.

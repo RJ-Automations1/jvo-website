@@ -53,8 +53,12 @@ function safeEqual(a: string, b: string): boolean {
   return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
 }
 
-/** HTTP Basic Auth gate. 503 when creds aren't configured, 401 on a bad login. */
-function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+/**
+ * HTTP Basic Auth gate. 503 when creds aren't configured, 401 on a bad login.
+ * Exported so other staff-only routers (the invoicing desk) sit behind the SAME
+ * gate explicitly, rather than inheriting it by mount order.
+ */
+export function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (!ADMIN_USER || !ADMIN_PASSWORD) {
     return res.status(503).send("Admin dashboard not configured (set ADMIN_USER and ADMIN_PASSWORD).");
   }
@@ -391,6 +395,7 @@ const ADMIN_PAGE = `<!doctype html>
 <header>
   <h1>Membership <em>Pipeline.</em></h1>
   <div class="sub">Jonesboro Virtual Office — Staff Dashboard</div>
+  <a href="/admin/invoices" style="margin-left:auto;font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--ink)">Invoicing desk →</a>
 </header>
 <main>
   <section id="board">

@@ -13,19 +13,26 @@ Applicant fills out the form and photographs their ID
         ▼
 Browser builds the PS Form 1583 PDF and shrinks the photos
         │
-        ▼
+        ▼ "Continue Registration"
 One request to the JVO server carrying form + photos
         │
         ├──► Dropbox   — one folder per client, form + ID images inside
-        ├──► Sheets    — one row on the client master list
+        ├──► Sheets    — one row on the client master list (with a timestamp)
         └──► Email     — "New member signup" to the JVO team
         │
         ▼
-Staff assign a suite number and prep the visit
+Applicant continues to Deskworks registration (the only step left for them)
+        │
+        ▼
+Staff assign a suite number, invoice from the master list (/admin/invoices)
         │
         ▼
 In-office visit: originals inspected, form signed and witnessed
 ```
+
+**Nothing is downloaded or printed by the applicant — business or residential.** JVO
+holds the filled form and has it ready to sign at the visit. The PDF exists only long
+enough to be sent to JVO.
 
 ---
 
@@ -42,7 +49,7 @@ The wizard collects, one step at a time:
 
 | Step | What's collected |
 |---|---|
-| Service type | Business/organization or residential/personal |
+| Service type | Business/organization (commercial) or residential/personal — each with a gold ⓘ explaining what that choice means for them |
 | Your information | Name, phone, email, home address, court-protection flag |
 | Business details | *(business only)* Name, type, address, place of registration |
 | Photo ID | ID type, number, issuing entity, expiration — **plus photos of both sides** |
@@ -66,17 +73,23 @@ sharp enough to read an ID number.
 - **HEIC (iPhone) images** that the browser can't decode are sent as-is up to 8 MB rather
   than dead-ending the applicant.
 
-### 4. Review and generate
+### 4. Review and continue
 
 The summary screen lists everything back, including an "Uploads" row, with an *Edit* link
-to any step. Clicking **Download Pre-Filled Form**:
+to any step. Clicking **Continue Registration**:
 
-1. Fills the official PS Form 1583 in the browser and downloads it to their device.
+1. Fills the official PS Form 1583 in the browser.
 2. Sends the form plus every uploaded file to JVO in one request.
+3. Shows the next step — continue to Deskworks registration.
 
-The form is generated locally either way, so **the applicant always ends up with their PDF**
-even if the JVO side of the transfer fails. If it does fail, they see a plain explanation and
-a **Retry sending** button that re-sends without regenerating anything.
+The form is never offered to the applicant as a download, on either service type.
+Their job is to finish registration and turn up with two IDs; JVO prints the 1583 for
+the visit. If someone needs a copy for a lender or registered agent, staff send it from
+the Dropbox folder.
+
+If the transfer to JVO fails they see a plain explanation and a **Retry sending** button
+that re-sends without rebuilding the form, plus the reassurance that they can continue
+to registration regardless — staff fill the form with them at the office.
 
 ### 5. What the server does
 
@@ -106,9 +119,21 @@ JVO being left with a folder that only looks complete.
 | **Suite #** | **Staff** — assigned at the visit |
 | **Status** | Starts at `New`, then staff |
 | **Notes** | **Staff** |
+| Invoice #, Invoice Total, Invoice Status, Balance Due | Automatic — written by the invoicing desk (see `invoicing.md`) |
 
-The system only ever *appends*. It never edits an existing row, so anything the team types
-into the sheet is safe.
+**Submitted is a date AND a time** (office-local, e.g. `2026-09-09 2:41 PM`), like the events
+site. A bare date can't tell two same-day applications apart, and staff work the list in
+arrival order. The column is also given a real date-time *number format* on first write —
+without that, Sheets stores the value as a date serial and a number-formatted column
+displays it as `46274`.
+
+**Columns are addressed by header name, never by position.** The live sheet is edited by
+people: columns get added, renamed, and moved, and a positional write eventually lands a
+phone number under "Suite #". A few spellings are accepted as synonyms ("Submission Date"
+counts as "Submitted"), and any column we need but can't find is appended to the right.
+
+Appends never touch an existing row. The *only* cells ever overwritten are the four billing
+columns, on the row an invoice was raised for — so anything the team types is safe.
 
 **c. Team email** — subject `New member signup — <Name>`, containing the applicant's contact
 details, plan, which documents they uploaded, the Dropbox folder path, and a reminder to
@@ -120,11 +145,11 @@ Set `NOTIFY_TO` to a comma-separated list to copy the whole team.
 Before the client arrives, staff open the Dropbox folder and can already check the ID hasn't
 expired, that the name matches, and that the address on the proof matches the form.
 
-### 7. The in-office visit — unchanged
+### 7. The in-office visit — unchanged in substance
 
-The applicant brings the **printed, unsigned** form and their **original** documents. Staff
-inspect the originals, witness the signature, complete the JVO sections, and file the form
-with USPS.
+The applicant brings their **original** documents; JVO brings the **printed, unsigned** form.
+Staff inspect the originals, witness the signature, complete the JVO sections, and file the
+form with USPS.
 
 > **The uploads never replace this.** USPS requires the CMRA to physically inspect original
 > identification. The photos exist so the visit starts prepared, not so it can be skipped.
@@ -187,5 +212,6 @@ permanently unscoped — this is the single most common way this setup fails.
 | `client/src/lib/fill1583.ts` | Fills the official PDF |
 | `client/src/lib/fileApplication.ts` | Sends everything to the server |
 | `server/mailboxApplication.ts` | Intake, validation, Dropbox upload, email |
-| `server/clientSheet.ts` | Master-list row append |
+| `server/clientSheet.ts` | Master list — header-driven append, read, and billing write-back |
+| `server/invoices.ts` | Invoicing desk + the customer pay page (see `invoicing.md`) |
 | `server/googleAuth.ts` | Shared Google service-account auth |

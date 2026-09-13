@@ -41,6 +41,8 @@ export interface BookingDetails {
   htmlLink?: string;
   /** Dollars actually charged through Stripe. Omitted for free bookings. */
   amountPaid?: number;
+  /** Card surcharge included in the charge, when one applied. */
+  cardFeePaid?: number;
 }
 
 /** Two-column detail rows — the part people actually scan for. */
@@ -74,7 +76,16 @@ export async function sendBookingEmails(
     ["Duration", b.durationLabel],
     // Doubles as the customer's receipt — it's the only confirmation of the
     // charge they get from us, so it belongs above the fold, not in a footer.
-    ["Paid", b.amountPaid !== undefined ? `$${b.amountPaid.toFixed(2)}` : undefined],
+    // The card fee is itemised: a total that doesn't match the price they were
+    // quoted reads as an error, however small the difference.
+    ["Room", b.amountPaid !== undefined && b.cardFeePaid ? `$${b.amountPaid.toFixed(2)}` : undefined],
+    ["Card fee", b.cardFeePaid ? `$${b.cardFeePaid.toFixed(2)}` : undefined],
+    [
+      "Paid",
+      b.amountPaid !== undefined
+        ? `$${(b.amountPaid + (b.cardFeePaid || 0)).toFixed(2)}`
+        : undefined,
+    ],
     ["Notes", b.notes],
   ];
 

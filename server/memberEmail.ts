@@ -539,3 +539,94 @@ ${settled ? "This invoice is now settled in full. Nothing further is owed." : `R
 
   return sendTransactional("payment receipt", { to: args.to, subject, text, html });
 }
+
+/* ── Mailbox application ──────────────────────────────────────────────── */
+
+/**
+ * Welcome the applicant the moment they finish the mailbox application.
+ *
+ * Until this existed the ONLY email an application produced went to the JVO
+ * team — the person who had just handed over their ID, their address and their
+ * signature heard nothing at all, and had no written record of what happens
+ * next. That silence is what this fixes.
+ *
+ * Sent via sendTransactional, so MEMBER_EMAILS_ENABLED does NOT hold it back:
+ * it answers something the customer did seconds ago, exactly like a booking
+ * confirmation. The kill switch exists for the pipeline's *unprompted* mail
+ * (reminders, sweeps), not for a receipt.
+ */
+export async function sendApplicationWelcome(args: {
+  to: string;
+  firstName: string;
+  plan?: string;
+  isBusiness: boolean;
+  businessName?: string;
+  photoIdLabel?: string;
+  addressIdLabel?: string;
+  registrationUrl: string;
+}): Promise<SendResult> {
+  const fn = (args.firstName || "there").trim() || "there";
+  const planLine = args.plan ? ` for the ${args.plan} plan` : "";
+  const subject = `Welcome to Jonesboro Virtual Office — we have your application`;
+
+  const bring = [
+    args.photoIdLabel ? `Your ${args.photoIdLabel}` : "Your government photo ID",
+    args.addressIdLabel ? `Your ${args.addressIdLabel}` : "Your proof of address",
+  ];
+
+  const text = `Hi ${fn},
+
+Welcome to Jonesboro Virtual Office, and thanks for signing up${planLine}.
+
+We have your mailbox application, your photo ID and your proof of address on file${
+    args.businessName ? ` for ${args.businessName}` : ""
+  }. Your USPS Form 1583 is filled in and waiting here at the office.
+
+WHAT HAPPENS NEXT
+
+1. Finish your registration, if you haven't already:
+   ${args.registrationUrl}
+
+2. Stop by the office with the ORIGINAL documents you uploaded:
+${bring.map((b) => `   • ${b}`).join("\n")}
+
+3. We'll have your Form 1583 printed and ready. You sign it in front of our
+   staff, we witness it and file it with USPS, and we'll assign your suite
+   number there and then.
+
+There is nothing for you to print or download — we have the form. Just bring
+those two original documents, and we'll take it from there.
+
+We're at ${OFFICE_ADDRESS}, Monday to Friday during business hours.
+
+Questions about any of it? Just reply to this email, or call ${OFFICE_PHONE}.${TEXT_FOOTER}`;
+
+  const html = shell("Welcome to Your Virtual Office.", `
+    <p>Hi ${escapeHtml(fn)},</p>
+    <p>Welcome to Jonesboro Virtual Office, and thanks for signing up${escapeHtml(planLine)}.</p>
+    <p>We have your mailbox application, your photo ID and your proof of address on file${
+      args.businessName ? ` for <strong>${escapeHtml(args.businessName)}</strong>` : ""
+    }. Your USPS Form 1583 is filled in and waiting here at the office.</p>
+
+    <p style="margin:22px 0 6px"><strong>What happens next</strong></p>
+    <ol style="margin:0 0 16px;padding-left:20px">
+      <li style="margin-bottom:8px">Finish your registration, if you haven't already — the button below.</li>
+      <li style="margin-bottom:8px">Stop by the office with the <strong>original</strong> documents you uploaded:
+        <ul style="margin:6px 0 0;padding-left:18px">
+          ${bring.map((b) => `<li>${escapeHtml(b)}</li>`).join("")}
+        </ul>
+      </li>
+      <li>We'll have your Form 1583 printed and ready. You sign it in front of our staff,
+          we witness it and file it with USPS, and we'll assign your suite number there and then.</li>
+    </ol>
+
+    ${button(args.registrationUrl, "Finish Your Registration")}
+
+    <p style="font-size:13px;color:#6B7280">There's nothing for you to print or download — we have the
+    form. Just bring those two original documents and we'll take it from there.</p>
+
+    <p>We're at ${escapeHtml(OFFICE_ADDRESS)}, Monday to Friday during business hours.
+    Questions about any of it? Just reply to this email, or call ${OFFICE_PHONE}.</p>`);
+
+  return sendTransactional("application welcome", { to: args.to, subject, text, html });
+}

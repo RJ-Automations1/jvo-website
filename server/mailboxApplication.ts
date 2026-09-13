@@ -24,8 +24,12 @@ import type { Express, Request, Response } from "express";
 import express from "express";
 import nodemailer from "nodemailer";
 import { appendClientRow, submissionStamp } from "./clientSheet.js";
+import { sendApplicationWelcome } from "./memberEmail.js";
 
 const DROPBOX_ROOT = process.env.DROPBOX_ROOT || "/JVO Mailbox Applications";
+/** Where the applicant finishes registration — the next step in their welcome email. */
+const REGISTRATION_URL =
+  process.env.DESKWORKS_SIGNUP_URL || "https://jvo.satellitedeskworks.com/member-sign-up";
 const MAX_PDF_BYTES = 5 * 1024 * 1024;
 const MAX_DOC_BYTES = 8 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
@@ -334,9 +338,36 @@ export function mountMailboxApplication(app: Express) {
     const logged = sheetRow !== null;
     const notified = await notifyTeam(applicant, folderName, docSummary, String(plan || ""), sheetRow);
 
+    /*
+     * Welcome the applicant themselves. They have just handed over their ID and
+     * their address; hearing nothing back is the wrong end of that exchange — and
+     * this is their only written record of what to bring to the office.
+     *
+     * Never allowed to fail the application: their documents are already filed.
+     */
+    let welcomed = false;
+    try {
+      const result = await sendApplicationWelcome({
+        to: applicant.email || "",
+        firstName: applicant.firstName,
+        plan: String(plan || ""),
+        isBusiness: applicant.serviceType === "business",
+        businessName: applicant.serviceType === "business" ? applicant.businessName : undefined,
+        photoIdLabel: applicant.photoIdLabel,
+        addressIdLabel: applicant.addressIdLabel,
+        registrationUrl: REGISTRATION_URL,
+      });
+      welcomed = result.sent;
+      if (!result.sent && applicant.email) {
+        console.warn(`mailbox-application: welcome email not sent to ${applicant.email} (${result.skipped || "SMTP not configured"})`);
+      }
+    } catch (e: any) {
+      console.error("mailbox-application: welcome email failed", e?.message);
+    }
+
     console.log(
-      `mailbox-application: filed "${folderName}" (${files.length} files, sheet=${logged ? `row ${sheetRow}` : "no"}, email=${notified})`
+      `mailbox-application: filed "${folderName}" (${files.length} files, sheet=${logged ? `row ${sheetRow}` : "no"}, team=${notified}, welcome=${welcomed})`
     );
-    res.json({ ok: true, folder: folderName, uploaded: files.length, notified, logged });
+    res.json({ ok: true, folder: folderName, uploaded: files.length, notified, logged, welcomed });
   });
 }

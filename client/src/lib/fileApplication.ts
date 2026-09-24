@@ -4,7 +4,7 @@
  * Dropbox under the client's folder, adds a row to the client master sheet, and
  * emails the JVO team.
  *
- * The applicant already has the downloaded PDF in hand and the in-office signing visit
+ * The applicant has already finished the questionnaire and the in-office signing visit
  * is what actually files the form with USPS, so a failure here is recoverable: the UI
  * offers a retry that re-sends without regenerating the form.
  */

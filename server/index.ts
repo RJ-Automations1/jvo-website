@@ -16,11 +16,16 @@ import { createServer } from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 import { JWT } from "google-auth-library";
-import { memberAdminRouter } from "./memberAdmin.js";
+import { memberAdminRouter, requireAdmin } from "./memberAdmin.js";
 import { onboardRouter } from "./memberPortal.js";
 import { initMemberScheduler } from "./memberScheduler.js";
 import { mountMailboxApplication } from "./mailboxApplication.js";
 import { mountChat } from "./chat.js";
+import {
+  invoicesRouter,
+  creditInvoiceCheckoutSession,
+  expireInvoiceCheckoutSession,
+} from "./invoices.js";
 import { getScopedClient } from "./googleAuth.js";
 import { sendBookingEmails } from "./bookingEmail.js";
 import { verifyMember } from "./memberLookup.js";
@@ -282,6 +287,7 @@ async function createCalendarBooking(b: ConfirmedBooking): Promise<{ eventId: st
     notes: b.notes,
     htmlLink: created.data.htmlLink,
     amountPaid: b.amountCents > 0 ? b.amountCents / 100 : undefined,
+    cardFeePaid: b.feeCents > 0 ? b.feeCents / 100 : undefined,
   })
     .then(({ customer, staff }) =>
       console.log(
@@ -323,6 +329,12 @@ async function startServer() {
       return busy.some((b) => b.start < end && b.end > start);
     },
     wallToInstant: (dateStr, hour, minute) => wallToInstant(dateStr, hour, minute, TIME_ZONE),
+    // Stripe delivers every event to the one webhook URL, so invoice payments
+    // are dispatched from inside it (see invoices.ts).
+    invoicePayments: {
+      credit: creditInvoiceCheckoutSession,
+      expire: expireInvoiceCheckoutSession,
+    },
   });
 
   app.use(express.json());
@@ -470,6 +482,7 @@ async function startServer() {
         startInstant,
         endInstant,
         amountCents: 0, // free — anything priced went through Stripe
+        feeCents: 0,
         isMember: member,
       });
       res.json({ ok: true, eventId: created.eventId, htmlLink: created.htmlLink });
@@ -487,6 +500,9 @@ async function startServer() {
   // frontend + SPA fallback so their routes are never swallowed by index.html.
   app.use(memberAdminRouter);
   app.use(onboardRouter);
+  // Invoicing: the staff desk at /admin/invoices (same Basic Auth) and the
+  // customer's tokenized pay page at /invoice/:token.
+  app.use(invoicesRouter(requireAdmin));
   initMemberScheduler();
 
   // Static frontend (built by Vite to dist/public).

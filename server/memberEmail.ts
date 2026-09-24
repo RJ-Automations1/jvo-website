@@ -133,15 +133,15 @@ export function shell(headingText: string, bodyHtml: string): string {
 </body></html>`;
 }
 
-export const TEXT_FOOTER = `\n\n—\nJonesboro Virtual Office\n${OFFICE_ADDRESS}\n${OFFICE_PHONE}\njonesborovirtualoffice@gmail.com`;
+export const TEXT_FOOTER = `\n\nJonesboro Virtual Office\n${OFFICE_ADDRESS}\n${OFFICE_PHONE}\njonesborovirtualoffice@gmail.com`;
 
 function firstName(member: { name?: string | null }): string {
   return ((member.name || "there").trim() || "there").split(/\s+/)[0];
 }
 
 const DOC_LABELS: Record<string, string> = {
-  license_front: "Driver's license — front",
-  license_back: "Driver's license — back",
+  license_front: "Driver's license (front)",
+  license_back: "Driver's license (back)",
   proof_of_residence: "Proof of residence",
   signed_1583: "Signed USPS Form 1583",
 };
@@ -166,7 +166,7 @@ export function prettyAppointment(appointmentAt: string | null): string {
 
 const BRING_LIST = [
   "Your printed, UNSIGNED USPS Form 1583 (we witness and notarize your signature in person)",
-  "The two original ID documents listed on your form — a government photo ID plus proof of your home address",
+  "The two original ID documents listed on your form: a government photo ID plus proof of your home address",
 ];
 
 /* ── Senders ──────────────────────────────────────────────────────────── */
@@ -174,10 +174,10 @@ const BRING_LIST = [
 /** Welcome + portal link — sent when staff start onboarding. */
 export async function sendMemberWelcome(member: any, portalUrl: string): Promise<SendResult> {
   const fn = firstName(member);
-  const subject = `Welcome to Jonesboro Virtual Office — let's activate your membership`;
+  const subject = `Welcome to Jonesboro Virtual Office, let's activate your membership`;
   const text = `Hi ${fn},
 
-Welcome to Jonesboro Virtual Office. Your membership (${member.public_id}) is almost ready — a few quick steps and you'll be fully active.
+Welcome to Jonesboro Virtual Office. Your membership (${member.public_id}) is almost ready. A few quick steps and you'll be fully active.
 
 Your personal onboarding checklist is here:
 ${portalUrl}
@@ -189,19 +189,19 @@ It walks you through:
 4. Preparing your USPS Form 1583 (our online wizard fills it for you)
 5. Scheduling your quick in-office visit to sign and notarize
 
-The whole thing takes about ten minutes. No long-term contracts, no surprises — just a professional address that works for your business.
+The whole thing takes about ten minutes. No long-term contracts, no surprises: just a professional address that works for your business.
 
 Questions? Reply to this email or call ${OFFICE_PHONE}.${TEXT_FOOTER}`;
   const html = shell("Let's Activate Your Membership.", `
     <p>Hi ${escapeHtml(fn)},</p>
-    <p>Welcome to Jonesboro Virtual Office. Your membership <strong>${escapeHtml(member.public_id)}</strong> is almost ready — a few quick steps and you'll be fully active.</p>
+    <p>Welcome to Jonesboro Virtual Office. Your membership <strong>${escapeHtml(member.public_id)}</strong> is almost ready. A few quick steps and you'll be fully active.</p>
     ${button(portalUrl, "Open Your Onboarding Checklist")}
     <p style="margin:0 0 6px"><strong>What the checklist covers:</strong></p>
     <ol style="margin:0 0 16px;padding-left:20px">
       <li>Confirm your contact and business details</li>
       <li>Upload your driver's license (front and back)</li>
       <li>Upload one proof of residence</li>
-      <li>Prepare your USPS Form 1583 — our online wizard fills it for you</li>
+      <li>Prepare your USPS Form 1583, our online wizard fills it for you</li>
       <li>Schedule your quick in-office visit to sign and notarize</li>
     </ol>
     <p>The whole thing takes about ten minutes. Questions? Just reply to this email or call ${OFFICE_PHONE}.</p>`);
@@ -221,7 +221,7 @@ export async function sendDocumentReminder(
     ...(needsInfo ? ["Confirm your contact and business details"] : []),
     ...items.map((i) => `Upload: ${i}`),
   ];
-  const subject = `A quick reminder — finish activating your JVO membership`;
+  const subject = `A quick reminder: finish activating your JVO membership`;
   const text = `Hi ${fn},
 
 You're close! Your Jonesboro Virtual Office membership (${member.public_id}) just needs a little more from you:
@@ -245,7 +245,7 @@ Once your documents are in, you'll pick a time for your quick in-office visit an
 export async function sendAppointmentConfirmation(member: any): Promise<SendResult> {
   const fn = firstName(member);
   const when = prettyAppointment(member.appointment_at);
-  const subject = `Your JVO visit is confirmed — ${when}`;
+  const subject = `Your JVO visit is confirmed for ${when}`;
   const text = `Hi ${fn},
 
 Your in-office visit is confirmed:
@@ -256,7 +256,7 @@ Jonesboro Virtual Office, ${OFFICE_ADDRESS}
 Please bring:
 ${BRING_LIST.map((b) => `  • ${b}`).join("\n")}
 
-The visit takes about 15 minutes — we verify your ID, witness and notarize your Form 1583, and hand you your welcome packet. Need to reschedule? Reply to this email or call ${OFFICE_PHONE}.${TEXT_FOOTER}`;
+The visit takes about 15 minutes. We verify your ID, witness and notarize your Form 1583, and hand you your welcome packet. Need to reschedule? Reply to this email or call ${OFFICE_PHONE}.${TEXT_FOOTER}`;
   const html = shell("Your Visit Is Confirmed.", `
     <p>Hi ${escapeHtml(fn)},</p>
     <p style="border-left:2px solid #0A0A0A;padding:10px 16px;background:#F5F5F5;border-radius:4px">
@@ -264,7 +264,7 @@ The visit takes about 15 minutes — we verify your ID, witness and notarize you
     </p>
     <p style="margin:16px 0 6px"><strong>Please bring:</strong></p>
     <ul style="margin:0 0 16px;padding-left:20px">${BRING_LIST.map((b) => `<li>${escapeHtml(b)}</li>`).join("")}</ul>
-    <p>The visit takes about 15 minutes — we verify your ID, witness and notarize your Form 1583, and hand you your welcome packet. Need to reschedule? Just reply or call ${OFFICE_PHONE}.</p>`);
+    <p>The visit takes about 15 minutes. We verify your ID, witness and notarize your Form 1583, and hand you your welcome packet. Need to reschedule? Just reply or call ${OFFICE_PHONE}.</p>`);
   return deliver("appointment confirmation", { to: member.email, subject, text, html });
 }
 
@@ -272,7 +272,7 @@ The visit takes about 15 minutes — we verify your ID, witness and notarize you
 export async function sendAppointmentReminder(member: any): Promise<SendResult> {
   const fn = firstName(member);
   const when = prettyAppointment(member.appointment_at);
-  const subject = `See you tomorrow — your JVO visit (${when})`;
+  const subject = `See you tomorrow: your JVO visit (${when})`;
   const text = `Hi ${fn},
 
 A friendly reminder: your in-office visit at Jonesboro Virtual Office is coming up.
@@ -286,7 +286,7 @@ ${BRING_LIST.map((b) => `  • ${b}`).join("\n")}
 Need to reschedule? Reply to this email or call ${OFFICE_PHONE}.${TEXT_FOOTER}`;
   const html = shell("See You Soon.", `
     <p>Hi ${escapeHtml(fn)},</p>
-    <p>A friendly reminder — your in-office visit is coming up:</p>
+    <p>A friendly reminder, your in-office visit is coming up:</p>
     <p style="border-left:2px solid #0A0A0A;padding:10px 16px;background:#F5F5F5;border-radius:4px">
       <strong>${escapeHtml(when)}</strong><br>${OFFICE_ADDRESS}
     </p>
@@ -306,27 +306,27 @@ export async function sendNeedsCorrection(
   const subject = `One small fix needed on your JVO membership application`;
   const text = `Hi ${fn},
 
-Thanks for your patience — we reviewed your onboarding items for membership ${member.public_id} and need one small fix before we can continue:
+Thanks for your patience. We reviewed your onboarding items for membership ${member.public_id} and need one small fix before we can continue:
 
 ${note || "Please see your checklist for details."}
 
 You can update everything here:
 ${portalUrl}
 
-Reply to this email or call ${OFFICE_PHONE} if anything is unclear — we're happy to help.${TEXT_FOOTER}`;
+Reply to this email or call ${OFFICE_PHONE} if anything is unclear. We're happy to help.${TEXT_FOOTER}`;
   const html = shell("One Small Fix Needed.", `
     <p>Hi ${escapeHtml(fn)},</p>
-    <p>Thanks for your patience — we reviewed your onboarding items for membership <strong>${escapeHtml(member.public_id)}</strong> and need one small fix before we can continue:</p>
+    <p>Thanks for your patience. We reviewed your onboarding items for membership <strong>${escapeHtml(member.public_id)}</strong> and need one small fix before we can continue:</p>
     <p style="border-left:2px solid #0A0A0A;padding:10px 16px;background:#F5F5F5;border-radius:4px">${escapeHtml(note || "Please see your checklist for details.")}</p>
     ${button(portalUrl, "Update Your Checklist")}
-    <p>Reply to this email or call ${OFFICE_PHONE} if anything is unclear — we're happy to help.</p>`);
+    <p>Reply to this email or call ${OFFICE_PHONE} if anything is unclear. We're happy to help.</p>`);
   return deliver("needs correction", { to: member.email, subject, text, html });
 }
 
 /** Membership approved → active. */
 export async function sendMembershipActive(member: any): Promise<SendResult> {
   const fn = firstName(member);
-  const subject = `You're active — welcome to Jonesboro Virtual Office`;
+  const subject = `You're active, welcome to Jonesboro Virtual Office`;
   const text = `Hi ${fn},
 
 It's official: your Jonesboro Virtual Office membership (${member.public_id}) is ACTIVE.
@@ -336,14 +336,14 @@ Your Business Name
 ${OFFICE_ADDRESS}
 
 What happens next:
-  • Mail handling — [mail pickup instructions placeholder: we'll notify you through the mailbox app when mail arrives; photo, forward, scan, or shred on request]
-  • Member rates on every space — conference room, private offices, classroom, content studio
+  • Mail handling: [mail pickup instructions placeholder: we'll notify you through the mailbox app when mail arrives; photo, forward, scan, or shred on request]
+  • Member rates on every space: conference room, private offices, classroom, content studio
   • 24/7 member access per your plan
 
 Thanks for choosing us. Your business, elevated.
 
 Questions any time: reply to this email or call ${OFFICE_PHONE}.${TEXT_FOOTER}`;
-  const html = shell("Welcome — You're Active.", `
+  const html = shell("You're Active.", `
     <p>Hi ${escapeHtml(fn)},</p>
     <p>It's official: your Jonesboro Virtual Office membership <strong>${escapeHtml(member.public_id)}</strong> is <strong>active</strong>.</p>
     <p style="border-left:2px solid #0A0A0A;padding:10px 16px;background:#F5F5F5;border-radius:4px">
@@ -351,8 +351,8 @@ Questions any time: reply to this email or call ${OFFICE_PHONE}.${TEXT_FOOTER}`;
     </p>
     <p style="margin:16px 0 6px"><strong>What happens next:</strong></p>
     <ul style="margin:0 0 16px;padding-left:20px">
-      <li>Mail handling — [mail pickup instructions placeholder: we'll notify you through the mailbox app when mail arrives; photo, forward, scan, or shred on request]</li>
-      <li>Member rates on every space — conference room, private offices, classroom, content studio</li>
+      <li>Mail handling: [mail pickup instructions placeholder: we'll notify you through the mailbox app when mail arrives; photo, forward, scan, or shred on request]</li>
+      <li>Member rates on every space: conference room, private offices, classroom, content studio</li>
       <li>24/7 member access per your plan</li>
     </ul>
     <p>Thanks for choosing us. Your business, elevated.</p>`);
@@ -393,9 +393,240 @@ export async function sendTransactional(
 
 /** Internal staff notification (new appointment, docs complete, stale member…). */
 export async function sendStaffNotification(subject: string, lines: string[]): Promise<SendResult> {
-  const text = `${lines.join("\n")}\n\n(Automated notification from the JVO membership pipeline — see /admin for details.)`;
+  const text = `${lines.join("\n")}\n\n(Automated notification from the JVO membership pipeline. See /admin for details.)`;
   const html = shell("Membership Pipeline Update.", `
     <p>${lines.map((l) => escapeHtml(l)).join("<br>")}</p>
-    <p style="color:#6B7280;font-size:13px">Automated notification from the JVO membership pipeline — see /admin for details.</p>`);
+    <p style="color:#6B7280;font-size:13px">Automated notification from the JVO membership pipeline. See /admin for details.</p>`);
   return deliver("staff notification", { to: MAIL_REPLY_TO, subject, text, html });
+}
+
+/* ── Invoicing ────────────────────────────────────────────────────────── */
+/*
+ * Both of these go out via sendTransactional, NOT the MEMBER_EMAILS_ENABLED
+ * gate: one is sent because staff pressed "send invoice", the other is a
+ * receipt for money that has just left the customer's card. Silently holding
+ * either back would be worse than not offering the button.
+ */
+
+export interface InvoiceEmailItem {
+  description: string;
+  quantity: number;
+  unitCents: number;
+}
+
+function money(cents: number): string {
+  const n = (Number(cents) || 0) / 100;
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** The invoice itself, with the pay link. */
+export async function sendInvoiceIssued(args: {
+  to: string;
+  name: string;
+  invoiceNumber: string;
+  items: InvoiceEmailItem[];
+  subtotalCents: number;
+  balanceCents: number;
+  dueDate: string;
+  memo: string;
+  payUrl: string;
+  allowPartial: boolean;
+  minPaymentCents: number;
+  cardFeePercent: number;
+}): Promise<SendResult> {
+  const fn = (args.name || "there").trim().split(/\s+/)[0] || "there";
+  const subject = `Invoice ${args.invoiceNumber} from Jonesboro Virtual Office for ${money(args.balanceCents)}`;
+
+  const lineText = args.items
+    .map((i) => `  • ${i.description}${i.quantity > 1 ? ` × ${i.quantity}` : ""}: ${money(Math.round(i.quantity * i.unitCents))}`)
+    .join("\n");
+  const partialText = args.allowPartial
+    ? `You can pay it in full, or part of it now and the rest later. The smallest payment we can take is ${money(args.minPaymentCents)}.`
+    : `This invoice is payable in full.`;
+  const feeText = args.cardFeePercent > 0
+    ? `Card payments carry a ${args.cardFeePercent}% processing fee, shown before you confirm. Cash or check at the office carries none.`
+    : `No processing fee applies.`;
+
+  const text = `Hi ${fn},
+
+Here is invoice ${args.invoiceNumber} from Jonesboro Virtual Office.
+
+${lineText}
+
+Total: ${money(args.subtotalCents)}
+Balance due: ${money(args.balanceCents)}${args.dueDate ? `\nDue: ${args.dueDate}` : ""}
+${args.memo ? `\n${args.memo}\n` : ""}
+${partialText}
+
+Pay online here:
+${args.payUrl}
+
+${feeText}
+
+Questions about anything on it? Just reply to this email.${TEXT_FOOTER}`;
+
+  const rows = args.items
+    .map(
+      (i) => `<tr>
+        <td style="padding:8px 0;border-bottom:1px solid #F0F0F0">${escapeHtml(i.description)}</td>
+        <td style="padding:8px 0;border-bottom:1px solid #F0F0F0;text-align:right;white-space:nowrap">${i.quantity}</td>
+        <td style="padding:8px 0;border-bottom:1px solid #F0F0F0;text-align:right;white-space:nowrap">${money(Math.round(i.quantity * i.unitCents))}</td>
+      </tr>`,
+    )
+    .join("");
+
+  const html = shell("Your JVO Invoice.", `
+    <p>Hi ${escapeHtml(fn)},</p>
+    <p>Here is invoice <strong>${escapeHtml(args.invoiceNumber)}</strong>${args.dueDate ? `, due <strong>${escapeHtml(args.dueDate)}</strong>` : ""}.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;margin:18px 0 8px">
+      <tr>
+        <th align="left" style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#6B7280;padding-bottom:6px;border-bottom:1px solid #E5E5E5">Item</th>
+        <th align="right" style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#6B7280;padding-bottom:6px;border-bottom:1px solid #E5E5E5">Qty</th>
+        <th align="right" style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#6B7280;padding-bottom:6px;border-bottom:1px solid #E5E5E5">Amount</th>
+      </tr>
+      ${rows}
+      <tr><td colspan="2" style="padding-top:12px;font-weight:600">Balance due</td>
+          <td align="right" style="padding-top:12px;font-weight:600">${money(args.balanceCents)}</td></tr>
+    </table>
+    ${args.memo ? `<p style="color:#6B7280;font-size:13px">${escapeHtml(args.memo)}</p>` : ""}
+    ${button(args.payUrl, "Pay This Invoice")}
+    <p style="font-size:13px;color:#6B7280">${escapeHtml(partialText)} ${escapeHtml(feeText)}</p>
+    <p>Questions about anything on it? Just reply to this email.</p>`);
+
+  return sendTransactional("invoice issued", { to: args.to, subject, text, html });
+}
+
+/** Receipt for one payment — including what, if anything, is still owed. */
+export async function sendPaymentReceipt(args: {
+  to: string;
+  name: string;
+  invoiceNumber: string;
+  amountCents: number;
+  feeCents: number;
+  balanceCents: number;
+  payUrl: string;
+}): Promise<SendResult> {
+  const fn = (args.name || "there").trim().split(/\s+/)[0] || "there";
+  const charged = args.amountCents + (args.feeCents || 0);
+  const settled = args.balanceCents <= 0;
+  const subject = settled
+    ? `Paid in full: receipt for invoice ${args.invoiceNumber}`
+    : `Payment received for invoice ${args.invoiceNumber} (${money(args.balanceCents)} remaining)`;
+
+  const text = `Hi ${fn},
+
+Thank you, we've received your payment on invoice ${args.invoiceNumber}.
+
+Applied to your invoice: ${money(args.amountCents)}${args.feeCents ? `\nCard processing fee:       ${money(args.feeCents)}` : ""}
+Charged to your card:      ${money(charged)}
+
+${settled ? "This invoice is now settled in full. Nothing further is owed." : `Remaining balance: ${money(args.balanceCents)}. You can pay the rest whenever suits, from the same link:\n${args.payUrl}`}${TEXT_FOOTER}`;
+
+  const html = shell(settled ? "Paid in Full." : "Payment Received.", `
+    <p>Hi ${escapeHtml(fn)},</p>
+    <p>Thank you, we've received your payment on invoice <strong>${escapeHtml(args.invoiceNumber)}</strong>.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;margin:16px 0">
+      <tr><td style="padding:6px 0">Applied to your invoice</td><td align="right" style="padding:6px 0">${money(args.amountCents)}</td></tr>
+      ${args.feeCents ? `<tr><td style="padding:6px 0;color:#6B7280">Card processing fee</td><td align="right" style="padding:6px 0;color:#6B7280">${money(args.feeCents)}</td></tr>` : ""}
+      <tr><td style="padding:10px 0 0;font-weight:600;border-top:1px solid #E5E5E5">Charged to your card</td>
+          <td align="right" style="padding:10px 0 0;font-weight:600;border-top:1px solid #E5E5E5">${money(charged)}</td></tr>
+    </table>
+    ${
+      settled
+        ? `<p>This invoice is now <strong>settled in full</strong>. Nothing further is owed.</p>`
+        : `<p>Remaining balance: <strong>${money(args.balanceCents)}</strong>. You can pay the rest whenever suits, from the same link.</p>${button(args.payUrl, "Pay The Balance")}`
+    }`);
+
+  return sendTransactional("payment receipt", { to: args.to, subject, text, html });
+}
+
+/* ── Mailbox application ──────────────────────────────────────────────── */
+
+/**
+ * Welcome the applicant the moment they finish the mailbox application.
+ *
+ * Until this existed the ONLY email an application produced went to the JVO
+ * team — the person who had just handed over their ID, their address and their
+ * signature heard nothing at all, and had no written record of what happens
+ * next. That silence is what this fixes.
+ *
+ * Sent via sendTransactional, so MEMBER_EMAILS_ENABLED does NOT hold it back:
+ * it answers something the customer did seconds ago, exactly like a booking
+ * confirmation. The kill switch exists for the pipeline's *unprompted* mail
+ * (reminders, sweeps), not for a receipt.
+ */
+export async function sendApplicationWelcome(args: {
+  to: string;
+  firstName: string;
+  plan?: string;
+  isBusiness: boolean;
+  businessName?: string;
+  photoIdLabel?: string;
+  addressIdLabel?: string;
+  registrationUrl: string;
+}): Promise<SendResult> {
+  const fn = (args.firstName || "there").trim() || "there";
+  const planLine = args.plan ? ` for the ${args.plan} plan` : "";
+  const subject = `Welcome to Jonesboro Virtual Office, we have your application`;
+
+  const bring = [
+    args.photoIdLabel ? `Your ${args.photoIdLabel}` : "Your government photo ID",
+    args.addressIdLabel ? `Your ${args.addressIdLabel}` : "Your proof of address",
+  ];
+
+  const text = `Hi ${fn},
+
+Welcome to Jonesboro Virtual Office, and thanks for signing up${planLine}.
+
+We have your mailbox application, your photo ID and your proof of address on file${
+    args.businessName ? ` for ${args.businessName}` : ""
+  }. Your USPS Form 1583 is filled in and waiting here at the office.
+
+WHAT HAPPENS NEXT
+
+1. Finish your registration, if you haven't already:
+   ${args.registrationUrl}
+
+2. Stop by the office with the ORIGINAL documents you uploaded:
+${bring.map((b) => `   • ${b}`).join("\n")}
+
+3. We'll have your Form 1583 printed and ready. You sign it in front of our
+   staff, we witness it and file it with USPS, and we'll assign your suite
+   number there and then.
+
+There is nothing for you to print or download. We have the form, so just bring
+those two original documents, and we'll take it from there.
+
+We're at ${OFFICE_ADDRESS}, Monday to Friday during business hours.
+
+Questions about any of it? Just reply to this email, or call ${OFFICE_PHONE}.${TEXT_FOOTER}`;
+
+  const html = shell("Welcome to Your Virtual Office.", `
+    <p>Hi ${escapeHtml(fn)},</p>
+    <p>Welcome to Jonesboro Virtual Office, and thanks for signing up${escapeHtml(planLine)}.</p>
+    <p>We have your mailbox application, your photo ID and your proof of address on file${
+      args.businessName ? ` for <strong>${escapeHtml(args.businessName)}</strong>` : ""
+    }. Your USPS Form 1583 is filled in and waiting here at the office.</p>
+
+    <p style="margin:22px 0 6px"><strong>What happens next</strong></p>
+    <ol style="margin:0 0 16px;padding-left:20px">
+      <li style="margin-bottom:8px">Finish your registration, if you haven't already, with the button below.</li>
+      <li style="margin-bottom:8px">Stop by the office with the <strong>original</strong> documents you uploaded:
+        <ul style="margin:6px 0 0;padding-left:18px">
+          ${bring.map((b) => `<li>${escapeHtml(b)}</li>`).join("")}
+        </ul>
+      </li>
+      <li>We'll have your Form 1583 printed and ready. You sign it in front of our staff,
+          we witness it and file it with USPS, and we'll assign your suite number there and then.</li>
+    </ol>
+
+    ${button(args.registrationUrl, "Finish Your Registration")}
+
+    <p style="font-size:13px;color:#6B7280">There's nothing for you to print or download. We have the
+    form. Just bring those two original documents and we'll take it from there.</p>
+
+    <p>We're at ${escapeHtml(OFFICE_ADDRESS)}, Monday to Friday during business hours.
+    Questions about any of it? Just reply to this email, or call ${OFFICE_PHONE}.</p>`);
+
+  return sendTransactional("application welcome", { to: args.to, subject, text, html });
 }

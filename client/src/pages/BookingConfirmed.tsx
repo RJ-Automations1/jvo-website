@@ -18,6 +18,9 @@ type Booking = {
   startTime: string;
   hours: number;
   amount: number;
+  /** Card surcharge, when one applied. */
+  fee?: number;
+  total?: number;
   isMember: boolean;
   name: string;
   email: string;
@@ -121,9 +124,18 @@ export default function BookingConfirmed() {
                 ["Date", longDate(state.booking.date)],
                 ["Time", state.booking.startTime],
                 ["Duration", `${state.booking.hours} ${state.booking.hours === 1 ? "hour" : "hours"}`],
+                // Itemised when a card fee applied, so the figure here matches
+                // the card statement rather than just the room rate.
+                ...(state.booking.fee
+                  ? [
+                      ["Room", `$${state.booking.amount.toFixed(2)}${state.booking.isMember ? " (member rate)" : ""}`],
+                      ["Card fee", `$${state.booking.fee.toFixed(2)}`],
+                    ]
+                  : []),
                 [
                   "Paid",
-                  `$${state.booking.amount.toFixed(2)}${state.booking.isMember ? " (member rate)" : ""}`,
+                  `$${(state.booking.total ?? state.booking.amount).toFixed(2)}` +
+                    (state.booking.fee || !state.booking.isMember ? "" : " (member rate)"),
                 ],
               ].map(([label, value]) => (
                 <div key={label} className="flex justify-between gap-6 py-3 text-sm">

@@ -23,9 +23,13 @@
 import type { Express, Request, Response } from "express";
 import express from "express";
 import nodemailer from "nodemailer";
-import { appendClientRow } from "./clientSheet.js";
+import { appendClientRow, submissionStamp } from "./clientSheet.js";
+import { sendApplicationWelcome } from "./memberEmail.js";
 
 const DROPBOX_ROOT = process.env.DROPBOX_ROOT || "/JVO Mailbox Applications";
+/** Where the applicant finishes registration — the next step in their welcome email. */
+const REGISTRATION_URL =
+  process.env.DESKWORKS_SIGNUP_URL || "https://jvo.satellitedeskworks.com/member-sign-up";
 const MAX_PDF_BYTES = 5 * 1024 * 1024;
 const MAX_DOC_BYTES = 8 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
@@ -212,7 +216,7 @@ function mailer() {
   });
 }
 
-async function notifyTeam(a: Applicant, folder: string, docSummary: string, plan: string, logged: boolean) {
+async function notifyTeam(a: Applicant, folder: string, docSummary: string, plan: string, sheetRow: number | null) {
   const transport = mailer();
   // NOTIFY_TO accepts a comma-separated list so the whole team is copied.
   const to = process.env.NOTIFY_TO || process.env.SMTP_USER;
@@ -236,10 +240,12 @@ async function notifyTeam(a: Applicant, folder: string, docSummary: string, plan
     ``,
     `Uploaded:    ${docSummary}`,
     `Dropbox:     ${DROPBOX_ROOT}/${folder}`,
-    `Master list: ${logged ? "row added" : "NOT added — check the sheet configuration"}`,
+    `Master list: ${sheetRow === null ? "NOT added — check the sheet configuration" : sheetRow ? `row ${sheetRow}` : "row added"}`,
     ``,
-    `Next: assign a suite number in the master list. The form is unsigned — they sign`,
-    `in front of staff at the in-office visit, where the original IDs are inspected.`,
+    `Next: assign a suite number in the master list, then write up their first invoice`,
+    `from the invoicing desk (/admin/invoices) — it reads that same row.`,
+    `The form is unsigned — they sign in front of staff at the in-office visit, where`,
+    `the original IDs are inspected.`,
   ];
   try {
     await transport.sendMail({
@@ -315,8 +321,10 @@ export function mountMailboxApplication(app: Express) {
 
     // Neither of these can fail the application — the Dropbox folder is the record of
     // truth, and the applicant is already done. We report what happened instead.
-    const logged = await appendClientRow({
-      submitted: new Date().toISOString().slice(0, 10),
+    const sheetRow = await appendClientRow({
+      // Date AND time, office-local — staff work the list in arrival order, and
+      // two applications on the same day have to be tellable apart.
+      submitted: submissionStamp(),
       name: [applicant.firstName, applicant.lastName].filter(Boolean).join(" "),
       company: applicant.businessName || "",
       email: applicant.email || "",
@@ -327,11 +335,39 @@ export function mountMailboxApplication(app: Express) {
       folder: folderName,
       documents: docSummary,
     });
-    const notified = await notifyTeam(applicant, folderName, docSummary, String(plan || ""), logged);
+    const logged = sheetRow !== null;
+    const notified = await notifyTeam(applicant, folderName, docSummary, String(plan || ""), sheetRow);
+
+    /*
+     * Welcome the applicant themselves. They have just handed over their ID and
+     * their address; hearing nothing back is the wrong end of that exchange — and
+     * this is their only written record of what to bring to the office.
+     *
+     * Never allowed to fail the application: their documents are already filed.
+     */
+    let welcomed = false;
+    try {
+      const result = await sendApplicationWelcome({
+        to: applicant.email || "",
+        firstName: applicant.firstName,
+        plan: String(plan || ""),
+        isBusiness: applicant.serviceType === "business",
+        businessName: applicant.serviceType === "business" ? applicant.businessName : undefined,
+        photoIdLabel: applicant.photoIdLabel,
+        addressIdLabel: applicant.addressIdLabel,
+        registrationUrl: REGISTRATION_URL,
+      });
+      welcomed = result.sent;
+      if (!result.sent && applicant.email) {
+        console.warn(`mailbox-application: welcome email not sent to ${applicant.email} (${result.skipped || "SMTP not configured"})`);
+      }
+    } catch (e: any) {
+      console.error("mailbox-application: welcome email failed", e?.message);
+    }
 
     console.log(
-      `mailbox-application: filed "${folderName}" (${files.length} files, sheet=${logged}, email=${notified})`
+      `mailbox-application: filed "${folderName}" (${files.length} files, sheet=${logged ? `row ${sheetRow}` : "no"}, team=${notified}, welcome=${welcomed})`
     );
-    res.json({ ok: true, folder: folderName, uploaded: files.length, notified, logged });
+    res.json({ ok: true, folder: folderName, uploaded: files.length, notified, logged, welcomed });
   });
 }
